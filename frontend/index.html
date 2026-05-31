@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure Messenger</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+</head>
+<body>
+
+    <div id="login-page" class="auth-page">
+        <h2>🔐 Secure Messenger</h2>
+        <input id="login-username" type="text" placeholder="Username" autocomplete="off" />
+        <input id="login-password" type="password" placeholder="Password" />
+        <button id="login-btn" onclick="handleLogin()">Sign In</button>
+        <p id="login-error" class="error-msg hidden"></p>
+        <div class="switch">
+            No account? <a onclick="showPage('register-page')">Create one</a>
+        </div>
+    </div>
+
+    <div id="register-page" class="auth-page hidden">
+        <h2>🔐 Create Account</h2>
+        <input id="reg-username" type="text" placeholder="Choose a username" autocomplete="off" />
+        <input id="reg-password" type="password" placeholder="Choose a password" />
+        <button id="reg-btn" onclick="handleRegister()">Create Account</button>
+        <p id="reg-error" class="error-msg hidden"></p>
+        <p id="reg-loading" class="loading-msg hidden">Generating encryption keys... ⏳</p>
+        <div class="switch">
+            Already have an account? <a onclick="showPage('login-page')">Sign in</a>
+        </div>
+    </div>
+
+    <div id="main-page" class="hidden">
+        <div class="main-header">
+            <h1>💬 Secure Messenger</h1>
+            <div class="user-info">
+                <span id="user-greeting"></span>
+                <button onclick="handleLogout()">Logout</button>
+            </div>
+        </div>
+        <div class="main-body">
+            <div class="sidebar">
+                <div class="search-box">
+                    <input id="search-input" type="text" placeholder="Search contacts..." oninput="handleSearch()" />
+                </div>
+                <div class="tab-bar">
+                    <button id="tab-messages" class="tab-btn active" onclick="switchTab('messages')">Messages</button>
+                    <button id="tab-invites" class="tab-btn" onclick="switchTab('invites')">Invites <span id="invite-count" class="invite-count hidden">0</span></button>
+                </div>
+                <div id="tab-content-messages" class="tab-content">
+                    <div id="user-list" class="user-list"></div>
+                    <div id="search-empty" class="search-empty hidden">No contacts found</div>
+                </div>
+                <div id="tab-content-invites" class="tab-content hidden">
+                    <div id="requests-list" class="requests-list"></div>
+                    <div id="invites-empty" class="search-empty">No pending requests</div>
+                </div>
+            </div>
+            <div class="chat-area">
+                <div id="chat-header" class="chat-header hidden">
+                    <div id="chat-avatar" class="chat-avatar"></div>
+                    <div id="chat-name"></div>
+                    <button id="chat-revoke-btn" class="revoke-btn hidden" title="Revoke access to your messages">🔑</button>
+                    <span id="chat-key-status" class="key-status hidden"></span>
+                    <button id="chat-request-key-btn" class="request-key-btn hidden" title="Request their key">🔑 Запросить ключ доступа</button>
+                </div>
+                <div id="messages" class="messages"></div>
+                <div id="typing-indicator" class="hidden"></div>
+                <div id="no-chat" class="no-chat">
+                    <div class="no-chat-content">
+                        <div class="no-chat-icon">💬</div>
+                        <p>Select a contact to start chatting</p>
+                    </div>
+                </div>
+                <div id="chat-area" class="hidden">
+                    <div class="input-area">
+                        <input id="message-input" type="text" placeholder="Type a message..." onkeyup="handleTyping()" onkeydown="if(event.key==='Enter') sendMessage()" />
+                        <button id="send-btn" onclick="sendMessage()">➤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/crypto.js"></script>
+    <script src="js/socket.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
