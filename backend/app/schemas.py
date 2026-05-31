@@ -30,6 +30,8 @@ class UserOut(BaseModel):
     encrypted_private_key: bytes | None
     broadcast_key: bytes | None
     permission_status: str = "none"
+    is_online: bool = False
+    last_seen: datetime | None = None
 
     model_config = {"from_attributes": True}
 

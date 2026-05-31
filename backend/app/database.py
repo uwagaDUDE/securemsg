@@ -50,3 +50,12 @@ async def init_db():
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """))
+
+    # migrate existing databases — add online status columns
+    async with engine.begin() as conn:
+        result3 = await conn.execute(text("PRAGMA table_info(users)"))
+        cols3 = {row[1] for row in result3}
+        if "last_seen" not in cols3:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN last_seen DATETIME"))
+        if "is_online" not in cols3:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN is_online BOOLEAN DEFAULT 0"))

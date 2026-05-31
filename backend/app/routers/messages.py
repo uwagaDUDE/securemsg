@@ -41,6 +41,7 @@ async def mark_read(
             (Message.sender_id == user_id) & (Message.receiver_id == current_user.id) & (Message.is_read == False)
         ).values(is_read=True)
     )
+    current_user.last_seen = datetime.now(timezone.utc)
     await db.commit()
 
 
@@ -164,6 +165,8 @@ async def request_key(
     req = KeyRequest(requester_id=current_user.id, target_id=user_id)
     db.add(req)
 
+    current_user.last_seen = datetime.now(timezone.utc)
+
     # persist system message
     sys_msg = Message(
         sender_id=current_user.id,
@@ -174,8 +177,8 @@ async def request_key(
     db.add(sys_msg)
     await db.commit()
 
-    # notify target via socket
-    room = f"user_{user_id}"
+    # notify both users via socket in the shared chat room
+    room = f"room_{min(current_user.id, user_id)}_{max(current_user.id, user_id)}"
     await sio.emit(
         "key_requested",
         {"requester_id": current_user.id, "requester_username": current_user.username},

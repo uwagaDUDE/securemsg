@@ -1,25 +1,40 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Permission, SharedKey, User
+from ..ratelimit import RateLimiter
 from ..schemas import PermissionOut
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/permissions", tags=["permissions"])
 
+_limiter = RateLimiter()
+
 
 @router.post("/request/{user_id}", response_model=PermissionOut)
 async def request_permission(
     user_id: int,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    allowed, remaining, retry_after = _limiter.check(f"perm:{current_user.id}", limit=10, window_seconds=60)
+    response.headers["X-RateLimit-Limit"] = "10"
+    response.headers["X-RateLimit-Remaining"] = str(remaining)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many permission requests"},
+            headers={"Retry-After": str(retry_after), "X-RateLimit-Limit": "10", "X-RateLimit-Remaining": "0"},
+        )
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot request yourself")
 

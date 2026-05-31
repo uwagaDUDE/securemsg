@@ -47,6 +47,10 @@ const MESSENGER_SOCKET = (() => {
         socket.on("key_requested", (data) => {
             if (handlers.onKeyRequested) handlers.onKeyRequested(data);
         });
+
+        socket.on("user_status", (data) => {
+            if (handlers.onUserStatus) handlers.onUserStatus(data);
+        });
     }
 
     function joinRoom(targetId) {

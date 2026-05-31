@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1a1a2e">
     <title>Secure Messenger</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="stylesheet" href="css/style.css" />
@@ -38,6 +40,7 @@
             <h1>💬 Secure Messenger</h1>
             <div class="user-info">
                 <span id="user-greeting"></span>
+                <button id="notif-toggle" onclick="toggleNotifications()" title="Toggle notifications">🔔</button>
                 <button onclick="handleLogout()">Logout</button>
             </div>
         </div>
@@ -61,6 +64,7 @@
             </div>
             <div class="chat-area">
                 <div id="chat-header" class="chat-header hidden">
+                    <button id="chat-back-btn" class="chat-back-btn" onclick="goBackToSidebar()">←</button>
                     <div id="chat-avatar" class="chat-avatar"></div>
                     <div id="chat-name"></div>
                     <button id="chat-revoke-btn" class="revoke-btn hidden" title="Revoke access to your messages">🔑</button>

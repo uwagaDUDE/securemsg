@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 
 import socketio
 from sqlalchemy import or_, select
@@ -23,12 +24,34 @@ async def connect(sid, environ, auth):
         raise socketio.exceptions.ConnectionRefusedError("Invalid token")
 
     user_id = payload["user_id"]
+    now = datetime.now(timezone.utc)
     async with async_session() as db:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
         if user is None:
             raise socketio.exceptions.ConnectionRefusedError("User not found")
+        user.is_online = True
+        user.last_seen = now
+        await db.commit()
         await sio.save_session(sid, {"user_id": user_id, "username": user.username})
+
+        # find all rooms the user is in (shared rooms with contacts)
+        perm_result = await db.execute(
+            select(Permission).where(
+                or_(
+                    Permission.owner_id == user_id,
+                    Permission.requester_id == user_id,
+                )
+            )
+        )
+        room_ids = set()
+        for p in perm_result.scalars().all():
+            other = p.requester_id if p.owner_id == user_id else p.owner_id
+            room_ids.add(other)
+
+    for other_id in room_ids:
+        room = _room_name(user_id, other_id)
+        await sio.emit("user_status", {"user_id": user_id, "is_online": True, "last_seen": now.isoformat()}, room=room)
 
     await sio.enter_room(sid, f"user_{user_id}")
     print(f"[connect] user {user_id} sid={sid}")
@@ -39,6 +62,32 @@ async def disconnect(sid):
     try:
         session = await sio.get_session(sid)
         user_id = session.get("user_id")
+        if user_id:
+            now = datetime.now(timezone.utc)
+            async with async_session() as db:
+                user = await db.get(User, user_id)
+                if user:
+                    user.is_online = False
+                    user.last_seen = now
+                    await db.commit()
+
+                perm_result = await db.execute(
+                    select(Permission).where(
+                        or_(
+                            Permission.owner_id == user_id,
+                            Permission.requester_id == user_id,
+                        )
+                    )
+                )
+                room_ids = set()
+                for p in perm_result.scalars().all():
+                    other = p.requester_id if p.owner_id == user_id else p.owner_id
+                    room_ids.add(other)
+
+            for other_id in room_ids:
+                room = _room_name(user_id, other_id)
+                await sio.emit("user_status", {"user_id": user_id, "is_online": False, "last_seen": now.isoformat()}, room=room)
+
         print(f"[disconnect] user {user_id} sid={sid}")
     except KeyError:
         print(f"[disconnect] unknown sid={sid}")
@@ -158,6 +207,8 @@ async def share_key(sid, data):
             db.add(sk)
         await db.commit()
 
+    session_data = await sio.get_session(sid)
+
     # persist system message
     sys_msg = Message(
         sender_id=owner_id,
@@ -169,7 +220,6 @@ async def share_key(sid, data):
     await db.commit()
 
     room = _room_name(owner_id, target_id)
-    session_data = await sio.get_session(sid)
     await sio.emit("key_shared", {"owner_id": owner_id, "owner_username": session_data.get("username", "")}, room=room)
     print(f"[share_key] {owner_id} -> {target_id}")
 
@@ -189,7 +239,7 @@ async def permission_requested(sid, data):
             "requester_username": requester.username if requester else "",
         }
 
-    room = f"user_{owner_id}"
+    room = _room_name(requester_id, owner_id)
     await sio.emit("permission_request", payload, room=room)
     print(f"[permission_requested] {requester_id} -> {owner_id}")
 
@@ -208,9 +258,24 @@ async def permission_responded(sid, data):
         "status": status,
     }
 
-    room = f"user_{requester_id}"
+    room = _room_name(owner_id, requester_id)
     await sio.emit("permission_response", payload, room=room)
     print(f"[permission_responded] {owner_id} -> {requester_id}: {status}")
+
+
+@sio.event
+async def get_user_status(sid, data):
+    """data: { user_id } — returns online status and last_seen for a user"""
+    target_id = data["user_id"]
+    async with async_session() as db:
+        user = await db.get(User, target_id)
+        if user is None:
+            return {"error": "User not found"}
+        return {
+            "user_id": user.id,
+            "is_online": user.is_online,
+            "last_seen": user.last_seen.isoformat() if user.last_seen else None,
+        }
 
 
 def _room_name(a: int, b: int) -> str:

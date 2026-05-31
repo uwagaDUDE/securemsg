@@ -19,6 +19,8 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    is_online: Mapped[bool] = mapped_column(Boolean, default=False)
 
     sent_messages: Mapped[list["Message"]] = relationship(
         foreign_keys="Message.sender_id", back_populates="sender"

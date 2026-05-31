@@ -11,12 +11,25 @@ os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_messenger.db"
 
 from backend.app.database import engine, init_db
 from backend.app.main import app
+from backend.app.routers.auth import _limiter as auth_limiter
+from backend.app.routers.permissions import _limiter as perm_limiter
+
+
+def _reset_limiters():
+    auth_limiter._store.clear()
+    auth_limiter._login_failures.clear()
+    auth_limiter._login_blocks.clear()
+    perm_limiter._store.clear()
+    perm_limiter._login_failures.clear()
+    perm_limiter._login_blocks.clear()
 
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
+    _reset_limiters()
     await init_db()
     yield
+    _reset_limiters()
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM key_requests"))
         await conn.execute(text("DELETE FROM permissions"))

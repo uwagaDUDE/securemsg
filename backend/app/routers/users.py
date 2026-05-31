@@ -44,6 +44,8 @@ async def _attach_permission_status(users: list[User], current_user: User, db: A
             encrypted_private_key=u.encrypted_private_key,
             broadcast_key=u.broadcast_key,
             permission_status=status,
+            is_online=u.is_online,
+            last_seen=u.last_seen,
         ))
     return out
 

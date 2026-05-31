@@ -20,12 +20,14 @@ body {
 
 /* ─── Auth pages ─── */
 .auth-page {
-    width: 380px;
+    width: 90%;
+    max-width: 400px;
     padding: 40px 36px;
     background: #16213e;
     border-radius: 16px;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
     animation: fadeIn 0.3s ease;
+    margin: auto;
 }
 
 @keyframes fadeIn {
@@ -51,6 +53,7 @@ body {
     font-size: 14px;
     outline: none;
     transition: border 0.2s;
+    min-height: 44px;
 }
 
 .auth-page input:focus {
@@ -68,6 +71,7 @@ body {
     font-weight: 600;
     cursor: pointer;
     transition: background 0.2s, transform 0.1s;
+    min-height: 44px;
 }
 
 .auth-page button:hover {
@@ -173,6 +177,7 @@ body {
     cursor: pointer;
     font-size: 12px;
     transition: background 0.2s, color 0.2s;
+    min-height: 44px;
 }
 
 .main-header .user-info button:hover {
@@ -194,6 +199,7 @@ body {
     border-right: 1px solid #0f3460;
     display: flex;
     flex-direction: column;
+    transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 .search-box {
@@ -211,6 +217,7 @@ body {
     font-size: 13px;
     outline: none;
     transition: border 0.2s;
+    min-height: 44px;
 }
 
 .search-box input:focus {
@@ -247,6 +254,7 @@ body {
     align-items: center;
     gap: 12px;
     border-bottom: 1px solid rgba(15, 52, 96, 0.3);
+    min-height: 56px;
 }
 
 .user-item:last-child {
@@ -273,6 +281,7 @@ body {
     font-size: 16px;
     color: #fff;
     flex-shrink: 0;
+    position: relative;
 }
 
 .user-item-info {
@@ -308,6 +317,7 @@ body {
     flex-direction: column;
     background: #1a1a2e;
     min-width: 0;
+    transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
 .chat-header {
@@ -449,6 +459,7 @@ body {
     font-size: 14px;
     outline: none;
     transition: border 0.2s;
+    min-height: 44px;
 }
 
 .input-area input:focus {
@@ -458,6 +469,7 @@ body {
 .input-area button {
     width: 42px;
     height: 42px;
+    min-height: 44px;
     border-radius: 50%;
     background: #e94560;
     color: #fff;
@@ -578,6 +590,7 @@ body {
     cursor: pointer;
     transition: color 0.15s, background 0.15s;
     position: relative;
+    min-height: 44px;
 }
 
 .tab-btn:hover {
@@ -637,6 +650,7 @@ body {
     padding: 6px 4px;
     font-size: 13px;
     border-bottom: 1px solid rgba(15,52,96,0.3);
+    min-height: 44px;
 }
 
 .request-item:last-child {
@@ -660,6 +674,8 @@ body {
 .request-actions button {
     width: 28px;
     height: 28px;
+    min-height: 44px;
+    min-width: 44px;
     border-radius: 50%;
     border: none;
     cursor: pointer;
@@ -710,6 +726,7 @@ body {
     font-size: 12px;
     flex-shrink: 0;
     transition: background 0.15s, color 0.15s;
+    min-height: 44px;
 }
 .btn-request:hover {
     background: #e94560;
@@ -734,10 +751,6 @@ body {
     padding: 0 4px;
 }
 
-.user-avatar {
-    position: relative;
-}
-
 /* ─── Revoke / Share key button ─── */
 .revoke-btn {
     background: transparent;
@@ -749,6 +762,7 @@ body {
     font-size: 14px;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
     margin-left: 8px;
+    min-height: 44px;
 }
 .revoke-btn:hover {
     background: #e94560;
@@ -775,14 +789,285 @@ body {
     font-size: 12px;
     transition: background 0.15s, color 0.15s;
     margin-left: auto;
+    min-height: 44px;
 }
 .request-key-btn:hover {
     background: #f39c12;
     color: #fff;
 }
 
+/* ─── Online dot ─── */
+.online-dot {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 10px;
+    height: 10px;
+    background: #27ae60;
+    border-radius: 50%;
+    border: 2px solid #16213e;
+}
+
+/* ─── Status colors ─── */
+.status-online {
+    color: #27ae60 !important;
+}
+.status-offline {
+    color: #667788 !important;
+    font-size: 11px !important;
+}
+
+/* ─── Chat back button (mobile) ─── */
+.chat-back-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    color: #e94560;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-right: 4px;
+    min-height: 44px;
+    min-width: 44px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: background 0.15s;
+}
+
+.chat-back-btn:hover {
+    background: rgba(233, 69, 96, 0.15);
+}
+
 /* ─── Highlight animation ─── */
 @keyframes highlight {
     0% { background: rgba(233,69,96,0.2); }
     100% { background: transparent; }
+}
+
+/* ─── Mobile back button (hidden on desktop) ─── */
+.mobile-back-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    color: #e94560;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-right: 4px;
+    min-height: 44px;
+    min-width: 44px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    transition: background 0.15s;
+}
+
+.mobile-back-btn:hover {
+    background: rgba(233, 69, 96, 0.15);
+}
+
+/* ═══════════════════════════════════════════════════
+   MOBILE VIEW TOGGLING CLASSES
+   ═══════════════════════════════════════════════════ */
+
+.sidebar.open {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.chat-area.open {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+/* ═══════════════════════════════════════════════════
+   MEDIA QUERIES — MOBILE
+   ═══════════════════════════════════════════════════ */
+
+/* ─── Below 768px: mobile layout ─── */
+@media (max-width: 768px) {
+    body {
+        align-items: stretch;
+    }
+
+    .auth-page {
+        padding: 32px 24px;
+    }
+
+    .main-header h1 {
+        font-size: 16px;
+    }
+
+    .main-header .user-info {
+        gap: 8px;
+    }
+
+    #user-greeting {
+        display: none;
+    }
+
+    .key-toggle-label span {
+        display: none;
+    }
+
+    .sidebar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        min-width: 100%;
+        z-index: 10;
+        transform: translateX(0);
+        opacity: 1;
+    }
+
+    .sidebar:not(.open) {
+        transform: translateX(-100%);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .chat-area {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 10;
+        transform: translateX(100%);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .chat-area:not(.open) {
+        transform: translateX(100%);
+        opacity: 0;
+        pointer-events: none;
+    }
+
+    .chat-area.open {
+        transform: translateX(0);
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    .mobile-back-btn {
+        display: flex;
+    }
+
+    .chat-back-btn {
+        display: flex;
+    }
+
+    .messages {
+        padding: 12px 14px;
+    }
+
+    .message-text {
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+
+    .input-area {
+        padding: 10px 12px;
+    }
+
+    .input-area input {
+        padding: 10px 14px;
+        font-size: 14px;
+    }
+
+    .user-item {
+        padding: 12px 16px;
+    }
+
+    .search-box {
+        padding: 10px 12px;
+    }
+}
+
+/* ─── Very small screens (< 400px) ─── */
+@media (max-width: 400px) {
+    .auth-page {
+        padding: 24px 18px;
+        border-radius: 12px;
+    }
+
+    .auth-page h2 {
+        font-size: 19px;
+        margin-bottom: 22px;
+    }
+
+    .auth-page input {
+        padding: 10px 12px;
+        font-size: 13px;
+    }
+
+    .auth-page button {
+        padding: 11px;
+        font-size: 14px;
+    }
+
+    .main-header {
+        padding: 8px 12px;
+    }
+
+    .main-header h1 {
+        font-size: 15px;
+    }
+
+    .chat-header {
+        padding: 10px 12px;
+    }
+
+    #chat-name {
+        font-size: 14px;
+    }
+
+    .messages {
+        padding: 10px 10px;
+    }
+
+    .message-text {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+
+    .message-time {
+        font-size: 9px;
+    }
+
+    .input-area {
+        padding: 8px 10px;
+        gap: 8px;
+    }
+
+    .input-area input {
+        padding: 8px 12px;
+        font-size: 13px;
+    }
+
+    .user-name {
+        font-size: 13px;
+    }
+
+    .user-last-msg {
+        font-size: 11px;
+    }
+
+    .no-chat-icon {
+        font-size: 36px;
+    }
+
+    .no-chat-content p {
+        font-size: 13px;
+    }
+
+    .search-box input {
+        font-size: 12px;
+        padding: 8px 12px;
+    }
 }

@@ -27,6 +27,7 @@
     let unreadCounts = {};
     let appToken = null;
     let userCache = {};
+    let notificationsEnabled = localStorage.getItem('notifications') === 'true';
 
     function b64enc(buf) {
         return btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -88,6 +89,12 @@
                 p.classList.add("hidden");
             }
         });
+    };
+
+    window.goBackToSidebar = function() {
+        document.querySelector('.sidebar').classList.add('open');
+        document.querySelector('.chat-area').classList.remove('open');
+        activeChatId = null;
     };
 
     // ── REGISTER ──
@@ -201,6 +208,46 @@
         location.reload();
     };
 
+    // ── notifications ──
+    function initNotifications() {
+        if ('Notification' in window && notificationsEnabled && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }
+
+    function showObfuscatedNotification(title) {
+        if (!notificationsEnabled || !('Notification' in window) || Notification.permission !== 'granted') return;
+        new Notification('Secure Messenger', {
+            body: 'Рекомендую проверить, тут что-то новое',
+            icon: '/favicon.png',
+            tag: 'securemsg',
+        });
+    }
+
+    window.toggleNotifications = async function() {
+        if (!('Notification' in window)) {
+            alert('Notifications not supported');
+            return;
+        }
+        if (Notification.permission === 'denied') {
+            alert('Notifications blocked by browser. Please enable in browser settings.');
+            return;
+        }
+        notificationsEnabled = !notificationsEnabled;
+        localStorage.setItem('notifications', notificationsEnabled);
+        if (notificationsEnabled && Notification.permission === 'default') {
+            await Notification.requestPermission();
+        }
+        updateNotificationButton();
+    };
+
+    function updateNotificationButton() {
+        const btn = $('notif-toggle');
+        if (!btn) return;
+        btn.textContent = notificationsEnabled ? '🔔' : '🔕';
+        btn.title = notificationsEnabled ? 'Disable notifications' : 'Enable notifications';
+    }
+
     // ── initialise app after login ──
     async function initApp(token) {
         appToken = token;
@@ -229,6 +276,8 @@
         await fetchUnreadCounts();
         loadIncomingRequests();
         connectSocket(token);
+        initNotifications();
+        updateNotificationButton();
     }
 
     function addSystemMessage(text) {
@@ -303,6 +352,27 @@
                 // re-render messages if in active chat with the requester
                 if (activeChatId === data.requester_id) {
                     renderMessages(activeChatId);
+                }
+            },
+            onUserStatus: (data) => {
+                if (userCache[data.user_id]) {
+                    userCache[data.user_id].is_online = data.is_online;
+                    userCache[data.user_id].last_seen = data.last_seen;
+                }
+                const item = document.querySelector(`.user-item[data-user-id="${data.user_id}"]`);
+                if (item) {
+                    const avatar = item.querySelector('.user-avatar');
+                    let dot = avatar?.querySelector('.online-dot');
+                    if (data.is_online && !dot) {
+                        const newDot = document.createElement('span');
+                        newDot.className = 'online-dot';
+                        avatar?.appendChild(newDot);
+                    } else if (!data.is_online && dot) {
+                        dot.remove();
+                    }
+                }
+                if (activeChatId === data.user_id) {
+                    // could update a status line under chat name
                 }
             },
         });
@@ -464,7 +534,14 @@
 
             let statusText, statusClass;
             let actionBtn = "";
-            if (u.permission_status === "approved") {
+            if (u.is_online) {
+                statusText = '🟢 Online';
+                statusClass = 'status-online';
+            } else if (u.last_seen) {
+                const d = new Date(u.last_seen);
+                statusText = `Last seen: ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+                statusClass = 'status-offline';
+            } else if (u.permission_status === "approved") {
                 statusText = "✓ Can chat";
                 statusClass = "status-approved";
             } else if (u.permission_status === "pending") {
@@ -483,7 +560,7 @@
             const badge = unread ? `<span class="unread-badge">${unread}</span>` : "";
 
             div.innerHTML = `
-                <div class="user-avatar">${letter}${badge}</div>
+                <div class="user-avatar">${letter}${badge}${u.is_online ? '<span class="online-dot"></span>' : ''}</div>
                 <div class="user-item-info">
                     <div class="user-name">${escHtml(u.username)}</div>
                     <div class="user-last-msg ${statusClass}">${statusText}</div>
@@ -602,6 +679,9 @@
                 console.error("requestKeyAccess failed:", msg);
                 return;
             }
+            if (activeChatId) {
+                await renderMessages(activeChatId);
+            }
         } catch (e) {
             console.error("requestKeyAccess failed:", e);
         }
@@ -670,6 +750,11 @@
         $("message-input").disabled = false;
         $("send-btn").disabled = false;
         $("message-input").focus();
+
+        if (window.innerWidth <= 768) {
+            document.querySelector('.sidebar').classList.remove('open');
+            document.querySelector('.chat-area').classList.add('open');
+        }
 
         MESSENGER_SOCKET.joinRoom(user.id);
         await loadSharedKey(user.id);
@@ -778,6 +863,7 @@
             const senderName = data.sender_username || userCache[peerId]?.username || "";
             updateTitle(senderName);
             fetchUnreadCounts();
+            showObfuscatedNotification('New message');
         }
     }
 
