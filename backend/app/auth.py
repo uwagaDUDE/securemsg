@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .config import JWT_ALGORITHM, JWT_EXPIRY_HOURS, JWT_SECRET
+from .config import JWT_ALGORITHM, JWT_EXPIRY_HOURS, JWT_SECRETS, SERVER_EPOCH
 from .database import get_db
 from .models import User
 
@@ -36,16 +36,32 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_token(user_id: int) -> str:
     payload = {
         "user_id": user_id,
+        "epoch": SERVER_EPOCH,
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, JWT_SECRETS[0], algorithm=JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
-    try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    for secret in JWT_SECRETS:
+        try:
+            payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+        except jwt.PyJWTError:
+            continue
+        if payload.get("epoch") != SERVER_EPOCH:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token from previous server session")
+        return payload
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+def decode_token_skip_epoch(token: str) -> dict:
+    """Like decode_token but allows old epoch — used only by /api/auth/refresh."""
+    for secret in JWT_SECRETS:
+        try:
+            return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+        except jwt.PyJWTError:
+            continue
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
 async def get_current_user(

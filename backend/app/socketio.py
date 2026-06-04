@@ -1,17 +1,28 @@
 import base64
+import json
 from datetime import datetime, timezone
 
 import socketio
 from sqlalchemy import or_, select
 
 from .auth import decode_token
+from .config import ALLOWED_ORIGINS, VAPID_CLAIMS, VAPID_PRIVATE_KEY
 from .database import async_session
-from .models import Message, Permission, SharedKey, User
+from .models import Attachment, GroupChat, GroupMember, GroupSharedKey, Message, Permission, PushSubscription, SharedKey, User
+
+try:
+    from pywebpush import webpush, WebPushException
+except ImportError:
+    webpush = None
+    WebPushException = None
+
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins="*",
+    cors_allowed_origins=ALLOWED_ORIGINS,
 )
+
+_user_sessions: dict[int, int] = {}
 
 
 @sio.event
@@ -30,31 +41,38 @@ async def connect(sid, environ, auth):
         user = result.scalar_one_or_none()
         if user is None:
             raise socketio.exceptions.ConnectionRefusedError("User not found")
-        user.is_online = True
+
+        prev = _user_sessions.get(user_id, 0)
+        _user_sessions[user_id] = prev + 1
+
+        just_came_online = (prev == 0)
+        if just_came_online:
+            user.is_online = True
+
         user.last_seen = now
         await db.commit()
         await sio.save_session(sid, {"user_id": user_id, "username": user.username})
 
-        # find all rooms the user is in (shared rooms with contacts)
-        perm_result = await db.execute(
-            select(Permission).where(
-                or_(
-                    Permission.owner_id == user_id,
-                    Permission.requester_id == user_id,
+        if just_came_online:
+            perm_result = await db.execute(
+                select(Permission).where(
+                    or_(
+                        Permission.owner_id == user_id,
+                        Permission.requester_id == user_id,
+                    )
                 )
             )
-        )
-        room_ids = set()
-        for p in perm_result.scalars().all():
-            other = p.requester_id if p.owner_id == user_id else p.owner_id
-            room_ids.add(other)
+            room_ids = set()
+            for p in perm_result.scalars().all():
+                other = p.requester_id if p.owner_id == user_id else p.owner_id
+                room_ids.add(other)
 
-    for other_id in room_ids:
-        room = _room_name(user_id, other_id)
-        await sio.emit("user_status", {"user_id": user_id, "is_online": True, "last_seen": now.isoformat()}, room=room)
+            for other_id in room_ids:
+                room = _room_name(user_id, other_id)
+                await sio.emit("user_status", {"user_id": user_id, "is_online": True, "last_seen": now.isoformat()}, room=room)
 
     await sio.enter_room(sid, f"user_{user_id}")
-    print(f"[connect] user {user_id} sid={sid}")
+    print(f"[connect] user {user_id} sid={sid} (sessions: {_user_sessions[user_id]})")
 
 
 @sio.event
@@ -64,55 +82,89 @@ async def disconnect(sid):
         user_id = session.get("user_id")
         if user_id:
             now = datetime.now(timezone.utc)
+
+            prev = _user_sessions.get(user_id, 0)
+            if prev <= 1:
+                _user_sessions.pop(user_id, None)
+            else:
+                _user_sessions[user_id] = prev - 1
+
+            just_went_offline = (prev <= 1)
+
             async with async_session() as db:
                 user = await db.get(User, user_id)
                 if user:
-                    user.is_online = False
-                    user.last_seen = now
-                    await db.commit()
+                    if just_went_offline:
+                        user.is_online = False
+                        user.last_seen = now
+                        await db.commit()
 
-                perm_result = await db.execute(
-                    select(Permission).where(
-                        or_(
-                            Permission.owner_id == user_id,
-                            Permission.requester_id == user_id,
+                        perm_result = await db.execute(
+                            select(Permission).where(
+                                or_(
+                                    Permission.owner_id == user_id,
+                                    Permission.requester_id == user_id,
+                                )
+                            )
                         )
-                    )
-                )
-                room_ids = set()
-                for p in perm_result.scalars().all():
-                    other = p.requester_id if p.owner_id == user_id else p.owner_id
-                    room_ids.add(other)
+                        room_ids = set()
+                        for p in perm_result.scalars().all():
+                            other = p.requester_id if p.owner_id == user_id else p.owner_id
+                            room_ids.add(other)
 
-            for other_id in room_ids:
-                room = _room_name(user_id, other_id)
-                await sio.emit("user_status", {"user_id": user_id, "is_online": False, "last_seen": now.isoformat()}, room=room)
+                        for other_id in room_ids:
+                            room = _room_name(user_id, other_id)
+                            await sio.emit("user_status", {"user_id": user_id, "is_online": False, "last_seen": now.isoformat()}, room=room)
 
-        print(f"[disconnect] user {user_id} sid={sid}")
+        print(f"[disconnect] user {user_id} sid={sid} (sessions: {_user_sessions.get(user_id, 0)})")
     except KeyError:
         print(f"[disconnect] unknown sid={sid}")
 
 
 @sio.event
 async def join_room(sid, data):
-    """data: { target_id }"""
+    """data: { target_id } for DMs, or { group_id } for group chats"""
     session = await sio.get_session(sid)
     user_id = session["user_id"]
-    target_id = data["target_id"]
-    room = _room_name(user_id, target_id)
-    await sio.enter_room(sid, room)
-    print(f"[join_room] {user_id}+{target_id} room={room}")
+
+    if "target_id" in data and data["target_id"]:
+        target_id = data["target_id"]
+        room = _room_name(user_id, target_id)
+        await sio.enter_room(sid, room)
+        print(f"[join_room] {user_id}+{target_id} room={room}")
+
+    if "group_id" in data and data["group_id"]:
+        group_id = data["group_id"]
+        async with async_session() as db:
+            gm_result = await db.execute(
+                select(GroupMember).where(
+                    (GroupMember.group_id == group_id) & (GroupMember.user_id == user_id)
+                )
+            )
+            if gm_result.scalar_one_or_none():
+                await sio.enter_room(sid, f"group_{group_id}")
+                print(f"[join_room] {user_id} joined group_{group_id}")
+
+    if "channel_id" in data and data["channel_id"]:
+        channel_id = data["channel_id"]
+        await sio.enter_room(sid, f"channel_{channel_id}")
+        print(f"[join_room] {user_id} joined channel_{channel_id}")
 
 
 @sio.event
 async def send_message(sid, data):
-    """data: { receiver_id, encrypted_content }"""
+    """data: { receiver_id, encrypted_content, attachment_ids?: int[] }"""
     session = await sio.get_session(sid)
     sender_id = session["user_id"]
+    return await _do_send_message(sender_id, data)
+
+
+async def _do_send_message(sender_id: int, data: dict) -> dict:
+    """Shared send logic: used by both socket event and REST fallback."""
     receiver_id = data["receiver_id"]
     encrypted_content = data["encrypted_content"]
+    attachment_ids = data.get("attachment_ids") or []
 
-    # check permission
     async with async_session() as db:
         result = await db.execute(
             select(Permission).where(
@@ -124,7 +176,12 @@ async def send_message(sid, data):
         )
         if not result.scalar_one_or_none():
             print(f"[send_message] BLOCKED {sender_id} -> {receiver_id}: no permission")
-            return
+            return {"error": "no_permission", "detail": f"No approved permission between {sender_id} and {receiver_id}"}
+
+        receiver_user = await db.get(User, receiver_id)
+        if receiver_user is None:
+            print(f"[send_message] BLOCKED {sender_id} -> {receiver_id}: receiver not found")
+            return {"error": "receiver_not_found", "detail": f"User {receiver_id} not found"}
 
         msg = Message(
             sender_id=sender_id,
@@ -132,6 +189,19 @@ async def send_message(sid, data):
             encrypted_content=encrypted_content,
         )
         db.add(msg)
+        await db.flush()
+
+        att_info = []
+        for att_id in attachment_ids:
+            att = await db.get(Attachment, att_id)
+            if att is not None and att.uploader_id == sender_id and att.message_id is None:
+                att.message_id = msg.id
+                att_info.append({
+                    "id": att.id,
+                    "mime_type": att.mime_type,
+                    "compressed_size": att.compressed_size,
+                })
+
         await db.commit()
         await db.refresh(msg)
 
@@ -144,12 +214,17 @@ async def send_message(sid, data):
             "receiver_id": receiver_id,
             "type": msg.type,
             "encrypted_content": encrypted_content,
+            "attachments": att_info,
             "created_at": msg.created_at.isoformat(),
         }
 
     room = _room_name(sender_id, receiver_id)
     await sio.emit("new_message", payload, room=room)
-    print(f"[send_message] {sender_id} -> {receiver_id}")
+    print(f"[send_message] {sender_id} -> {receiver_id} ({len(att_info)} atts)")
+
+    await _send_push_notification(receiver_id, sender.username, encrypted_content)
+
+    return {"ok": True, "message_id": msg.id}
 
 
 @sio.event
@@ -280,3 +355,100 @@ async def get_user_status(sid, data):
 
 def _room_name(a: int, b: int) -> str:
     return f"room_{min(a, b)}_{max(a, b)}"
+
+
+@sio.event
+async def share_group_key(sid, data):
+    """data: { group_id, target_id, encrypted_broadcast_key }"""
+    session = await sio.get_session(sid)
+    owner_id = session["user_id"]
+    group_id = data["group_id"]
+    target_id = data["target_id"]
+
+    encrypted_bytes = base64.b64decode(data["encrypted_broadcast_key"])
+
+    async with async_session() as db:
+        gm_result = await db.execute(
+            select(GroupMember).where(
+                (GroupMember.group_id == group_id) & (GroupMember.user_id == owner_id)
+            )
+        )
+        if not gm_result.scalar_one_or_none():
+            return
+
+        existing = await db.execute(
+            select(GroupSharedKey).where(
+                (GroupSharedKey.group_id == group_id) &
+                (GroupSharedKey.owner_id == owner_id) &
+                (GroupSharedKey.target_id == target_id)
+            )
+        )
+        existing_key = existing.scalar_one_or_none()
+        if existing_key:
+            existing_key.encrypted_broadcast_key = encrypted_bytes
+        else:
+            gsk = GroupSharedKey(
+                group_id=group_id,
+                owner_id=owner_id,
+                target_id=target_id,
+                encrypted_broadcast_key=encrypted_bytes,
+            )
+            db.add(gsk)
+        await db.commit()
+
+    await sio.emit("group_key_shared", {
+        "group_id": group_id,
+        "owner_id": owner_id,
+        "target_id": target_id,
+        "owner_username": session.get("username", ""),
+    }, room=f"group_{group_id}")
+    print(f"[share_group_key] {owner_id} -> {target_id} in group {group_id}")
+
+
+async def _send_push_notification(user_id: int, sender_name: str, encrypted_content: str):
+    """Send Web Push to user if they are offline and have a subscription."""
+    if webpush is None:
+        return
+
+    async with async_session() as db:
+        user = await db.get(User, user_id)
+        if user is None or user.is_online:
+            return
+
+        result = await db.execute(
+            select(PushSubscription).where(PushSubscription.user_id == user_id)
+        )
+        sub = result.scalar_one_or_none()
+        if sub is None:
+            return
+
+    try:
+        payload = {
+            "title": "Secure Messenger",
+            "body": f"New message from {sender_name}",
+            "icon": "/favicon.png",
+            "badge": "/favicon.png",
+            "tag": "securemsg",
+            "data": {"url": "/"},
+        }
+
+        webpush(
+            subscription_info={
+                "endpoint": sub.endpoint,
+                "keys": {"p256dh": sub.p256dh, "auth": sub.auth},
+            },
+            data=json.dumps(payload),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims=VAPID_CLAIMS,
+            timeout=10,
+        )
+        print(f"[push] sent to user {user_id}")
+    except Exception as e:
+        print(f"[push] failed for user {user_id}: {e}")
+        if WebPushException is not None and isinstance(e, WebPushException):
+            if e.response and e.response.status_code in (404, 410):
+                async with async_session() as db2:
+                    stale = await db2.get(PushSubscription, sub.id)
+                    if stale:
+                        await db2.delete(stale)
+                        await db2.commit()

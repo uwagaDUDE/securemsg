@@ -117,6 +117,29 @@ const CRYPTO = {
         }
     },
 
+    async encryptBinary(data, broadcastKey) {
+        const iv = crypto.getRandomValues(new Uint8Array(16));
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: "AES-CBC", iv },
+            broadcastKey,
+            data
+        );
+        const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(ciphertext), iv.length);
+        return combined;
+    },
+
+    async decryptBinary(encryptedData, broadcastKey) {
+        const iv = encryptedData.slice(0, 16);
+        const data = encryptedData.slice(16);
+        return new Uint8Array(await crypto.subtle.decrypt(
+            { name: "AES-CBC", iv },
+            broadcastKey,
+            data
+        ));
+    },
+
     async encryptBroadcastKey(broadcastKeyRaw, targetPublicKeySpki) {
         const pubKey = await this.importPublicKey(targetPublicKeySpki);
         const encrypted = await crypto.subtle.encrypt(

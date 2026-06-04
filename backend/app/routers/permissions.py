@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -129,6 +129,24 @@ async def outgoing_requests(
         .order_by(Permission.created_at.desc())
     )
     return await _batch_to_out(result.scalars().all(), db)
+
+
+@router.delete("/outgoing/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_outgoing_request(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Permission).where(
+            (Permission.owner_id == user_id) & (Permission.requester_id == current_user.id)
+        )
+    )
+    perm = result.scalar_one_or_none()
+    if perm is None:
+        raise HTTPException(status_code=404, detail="No outgoing request to this user")
+    await db.delete(perm)
+    await db.commit()
 
 
 @router.get("/approved", response_model=list[PermissionOut])

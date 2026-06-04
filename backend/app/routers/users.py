@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Permission, User
+from ..models import Block, Permission, User
 from ..schemas import UserOut
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,15 @@ async def list_users(
     if not related_ids:
         return []
 
+    blocked_result = await db.execute(
+        select(Block.blocked_id).where(Block.blocker_id == current_user.id)
+    )
+    blocked_ids = {row[0] for row in blocked_result}
+    related_ids -= blocked_ids
+
+    if not related_ids:
+        return []
+
     result = await db.execute(
         select(User).where(User.id.in_(related_ids)).order_by(User.username)
     )
@@ -87,11 +96,18 @@ async def search_users(
     current_user: User = Depends(get_current_user),
 ):
     try:
+        blocked_result = await db.execute(
+            select(Block.blocked_id).where(Block.blocker_id == current_user.id)
+        )
+        blocked_ids = {row[0] for row in blocked_result}
+
         stmt = select(User).where(User.id != current_user.id)
         if q:
             escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             pattern = f"%{escaped}%"
             stmt = stmt.where(func.lower(User.username).like(func.lower(pattern), escape="\\"))
+        if blocked_ids:
+            stmt = stmt.where(User.id.notin_(blocked_ids))
         stmt = stmt.order_by(User.username)
         result = await db.execute(stmt)
         users = result.scalars().all()
