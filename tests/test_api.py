@@ -9,18 +9,18 @@ pytestmark = pytest.mark.asyncio
 class TestAuth:
     async def test_register_success(self, client: AsyncClient):
         r = await client.post("/api/auth/register", json={
-            "username": "bob", "password": "pass",
+            "username": "bob", "password": "Pass1234",
             "public_key": "AQID",
         })
         assert r.status_code == 200
         data = r.json()
-        assert "token" in data
+        assert "access_token" in data
         assert data["username"] == "bob"
         assert isinstance(data["user_id"], int)
 
     async def test_register_duplicate(self, client: AsyncClient, registered_user: dict):
         r = await client.post("/api/auth/register", json={
-            "username": "alice", "password": "other",
+            "username": "alice", "password": "Other123",
         })
         assert r.status_code == 400
         assert "already taken" in r.json()["detail"]
@@ -29,18 +29,18 @@ class TestAuth:
         r = await client.post("/api/auth/register", json={
             "username": "emptypw", "password": "",
         })
-        assert r.status_code == 200
+        assert r.status_code == 422
 
     async def test_register_with_all_keys(self, client: AsyncClient):
         r = await client.post("/api/auth/register", json={
-            "username": "fullkeys", "password": "pass",
+            "username": "fullkeys", "password": "Pass1234",
             "public_key": base64.b64encode(b"pubkey").decode(),
             "encrypted_private_key": base64.b64encode(b"enc_priv").decode(),
             "broadcast_key": base64.b64encode(b"bcast").decode(),
         })
         assert r.status_code == 200
         data = r.json()
-        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {data['token']}"})
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"})
         me_data = me.json()
         assert me_data["public_key"] == base64.b64encode(b"pubkey").decode()
         assert me_data["encrypted_private_key"] == base64.b64encode(b"enc_priv").decode()
@@ -48,11 +48,11 @@ class TestAuth:
 
     async def test_login_success(self, client: AsyncClient, registered_user: dict):
         r = await client.post("/api/auth/login", json={
-            "username": "alice", "password": "pass123",
+            "username": "alice", "password": "Pass1234",
         })
         assert r.status_code == 200
         data = r.json()
-        assert "token" in data
+        assert "access_token" in data
         assert data["username"] == "alice"
 
     async def test_login_wrong_password(self, client: AsyncClient, registered_user: dict):
@@ -71,7 +71,7 @@ class TestAuth:
         r = await client.post("/api/auth/login", json={
             "username": "alice", "password": "",
         })
-        assert r.status_code == 401
+        assert r.status_code == 422
 
     async def test_login_long_password(self, client: AsyncClient, registered_user: dict):
         r = await client.post("/api/auth/login", json={
@@ -104,9 +104,9 @@ class TestUsers:
 
     async def test_list_users_shows_others(self, client: AsyncClient, registered_user: dict):
         r2 = await client.post("/api/auth/register", json={
-            "username": "bob", "password": "pass",
+            "username": "bob", "password": "Pass1234",
         })
-        bob_token = r2.json()["token"]
+        bob_token = r2.json()["access_token"]
         bob_id = r2.json()["user_id"]
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
             "Authorization": f"Bearer {bob_token}",
@@ -127,7 +127,7 @@ class TestUsers:
 
 class TestUserSearch:
     async def test_search_no_query(self, client: AsyncClient, registered_user: dict):
-        await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         r = await client.get("/api/users/search", headers={
             "Authorization": f"Bearer {registered_user['token']}",
         })
@@ -137,8 +137,8 @@ class TestUserSearch:
         assert r.json()[0]["permission_status"] == "none"
 
     async def test_search_by_query(self, client: AsyncClient, registered_user: dict):
-        await client.post("/api/auth/register", json={"username": "bobmarley", "password": "pass"})
-        await client.post("/api/auth/register", json={"username": "bobalice", "password": "pass"})
+        await client.post("/api/auth/register", json={"username": "bobmarley", "password": "Pass1234"})
+        await client.post("/api/auth/register", json={"username": "bobalice", "password": "Pass1234"})
         r = await client.get("/api/users/search?q=bob", headers={
             "Authorization": f"Bearer {registered_user['token']}",
         })
@@ -149,7 +149,7 @@ class TestUserSearch:
         assert "alice" not in usernames
 
     async def test_search_partial(self, client: AsyncClient, registered_user: dict):
-        await client.post("/api/auth/register", json={"username": "johnwick", "password": "pass"})
+        await client.post("/api/auth/register", json={"username": "johnwick", "password": "Pass1234"})
         r = await client.get("/api/users/search?q=wick", headers={
             "Authorization": f"Bearer {registered_user['token']}",
         })
@@ -165,7 +165,7 @@ class TestUserSearch:
         assert r.json() == []
 
     async def test_search_case_insensitive(self, client: AsyncClient, registered_user: dict):
-        await client.post("/api/auth/register", json={"username": "Charlie", "password": "pass"})
+        await client.post("/api/auth/register", json={"username": "Charlie", "password": "Pass1234"})
         r = await client.get("/api/users/search?q=charlie", headers={
             "Authorization": f"Bearer {registered_user['token']}",
         })
@@ -184,16 +184,16 @@ class TestUserSearch:
         assert r.json() == []
 
     async def test_search_special_chars(self, client: AsyncClient, registered_user: dict):
-        await client.post("/api/auth/register", json={"username": "test%user", "password": "pass"})
-        r = await client.get("/api/users/search?q=test%25", headers={
+        await client.post("/api/auth/register", json={"username": "test_user_1", "password": "Pass1234"})
+        r = await client.get("/api/users/search?q=test_user", headers={
             "Authorization": f"Bearer {registered_user['token']}",
         })
         assert r.status_code == 200
         assert len(r.json()) == 1
-        assert r.json()[0]["username"] == "test%user"
+        assert r.json()[0]["username"] == "test_user_1"
 
     async def test_search_underscore(self, client: AsyncClient, registered_user: dict):
-        await client.post("/api/auth/register", json={"username": "test_user", "password": "pass"})
+        await client.post("/api/auth/register", json={"username": "test_user", "password": "Pass1234"})
         r = await client.get("/api/users/search?q=test_", headers={
             "Authorization": f"Bearer {registered_user['token']}",
         })
@@ -205,7 +205,7 @@ class TestUserSearch:
 class TestMessages:
     async def test_history_empty(self, client: AsyncClient, registered_user: dict):
         r2 = await client.post("/api/auth/register", json={
-            "username": "bob", "password": "pass",
+            "username": "bob", "password": "Pass1234",
         })
         bob_id = r2.json()["user_id"]
         r = await client.get(f"/api/messages/{bob_id}", headers={
@@ -234,7 +234,7 @@ class TestMessages:
 class TestSharedKey:
     async def test_shared_key_none_by_default(self, client: AsyncClient, registered_user: dict):
         r2 = await client.post("/api/auth/register", json={
-            "username": "bob", "password": "pass",
+            "username": "bob", "password": "Pass1234",
         })
         bob_id = r2.json()["user_id"]
         r = await client.get(f"/api/messages/{bob_id}/shared-key", headers={
@@ -248,7 +248,7 @@ class TestSharedKey:
         assert r.status_code in (401, 403)
 
     async def test_has_my_key_none_by_default(self, client: AsyncClient, registered_user: dict):
-        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_id = r2.json()["user_id"]
         r = await client.get(f"/api/messages/{bob_id}/has-my-key", headers={
             "Authorization": f"Bearer {registered_user['token']}",
@@ -261,7 +261,7 @@ class TestSharedKey:
         assert r.status_code in (401, 403)
 
     async def test_revoke_shared_key(self, client: AsyncClient, registered_user: dict):
-        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_id = r2.json()["user_id"]
 
         r1 = await client.get(f"/api/messages/{bob_id}/has-my-key", headers={
@@ -298,7 +298,7 @@ class TestSharedKey:
 
 class TestPermissions:
     async def test_request_permission(self, client: AsyncClient, registered_user: dict):
-        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_id = r2.json()["user_id"]
         r = await client.post(f"/api/permissions/request/{bob_id}", headers={
             "Authorization": f"Bearer {registered_user['token']}",
@@ -316,7 +316,7 @@ class TestPermissions:
         assert r.status_code == 400
 
     async def test_request_duplicate(self, client: AsyncClient, registered_user: dict):
-        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_id = r2.json()["user_id"]
         await client.post(f"/api/permissions/request/{bob_id}", headers={
             "Authorization": f"Bearer {registered_user['token']}",
@@ -333,9 +333,9 @@ class TestPermissions:
         assert r.status_code == 404
 
     async def test_approve_permission_flow(self, client: AsyncClient, registered_user: dict):
-        r = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_data = r.json()
-        bob_token = bob_data["token"]
+        bob_token = bob_data["access_token"]
 
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
             "Authorization": f"Bearer {bob_token}",
@@ -368,13 +368,13 @@ class TestPermissions:
         assert r.status_code == 404
 
     async def test_approve_not_owner(self, client: AsyncClient, registered_user: dict):
-        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r2 = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_data = r2.json()
-        r3 = await client.post("/api/auth/register", json={"username": "charlie", "password": "pass"})
+        r3 = await client.post("/api/auth/register", json={"username": "charlie", "password": "Pass1234"})
         charlie_data = r3.json()
 
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
-            "Authorization": f"Bearer {bob_data['token']}",
+            "Authorization": f"Bearer {bob_data['access_token']}",
         })
         r = await client.get("/api/permissions/incoming", headers={
             "Authorization": f"Bearer {registered_user['token']}",
@@ -382,13 +382,13 @@ class TestPermissions:
         perm_id = r.json()[0]["id"]
 
         r = await client.post(f"/api/permissions/{perm_id}/approve", headers={
-            "Authorization": f"Bearer {charlie_data['token']}",
+            "Authorization": f"Bearer {charlie_data['access_token']}",
         })
         assert r.status_code == 404
 
     async def test_reject_permission(self, client: AsyncClient, registered_user: dict):
-        r = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
-        bob_token = r.json()["token"]
+        r = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
+        bob_token = r.json()["access_token"]
 
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
             "Authorization": f"Bearer {bob_token}",
@@ -412,8 +412,8 @@ class TestPermissions:
         assert r.status_code == 404
 
     async def test_approved_list_shows_both_directions(self, client: AsyncClient, registered_user: dict):
-        r = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
-        bob_token = r.json()["token"]
+        r = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
+        bob_token = r.json()["access_token"]
         bob_id = r.json()["user_id"]
 
         r = await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
@@ -436,8 +436,8 @@ class TestPermissions:
         assert len(r.json()) == 1
 
     async def test_permission_status_in_user_list(self, client: AsyncClient, registered_user: dict):
-        r = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
-        bob_token = r.json()["token"]
+        r = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
+        bob_token = r.json()["access_token"]
 
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
             "Authorization": f"Bearer {bob_token}",
@@ -552,9 +552,9 @@ class TestKeyRequest:
 
 class TestRejectCleansSharedKeys:
     async def test_reject_cleans_shared_keys(self, client: AsyncClient, registered_user: dict):
-        r = await client.post("/api/auth/register", json={"username": "bob", "password": "pass"})
+        r = await client.post("/api/auth/register", json={"username": "bob", "password": "Pass1234"})
         bob_data = r.json()
-        bob_token = bob_data["token"]
+        bob_token = bob_data["access_token"]
 
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
             "Authorization": f"Bearer {bob_token}",
@@ -574,7 +574,7 @@ class TestRejectCleansSharedKeys:
 class TestRateLimit:
     async def test_register_rate_limit_headers(self, client: AsyncClient):
         r = await client.post("/api/auth/register", json={
-            "username": "rl_user1", "password": "pass",
+            "username": "rl_user1", "password": "Pass1234",
         })
         assert r.status_code == 200
         assert "X-RateLimit-Limit" in r.headers
@@ -584,12 +584,12 @@ class TestRateLimit:
     async def test_register_rate_limit_exceeded(self, client: AsyncClient):
         for i in range(5):
             r = await client.post("/api/auth/register", json={
-                "username": f"rl_limit_{i}", "password": "pass",
+                "username": f"rl_limit_{i}", "password": "Pass1234",
             })
             assert r.status_code == 200
 
         r = await client.post("/api/auth/register", json={
-            "username": "rl_limit_5", "password": "pass",
+            "username": "rl_limit_5", "password": "Pass1234",
         })
         assert r.status_code == 429
         assert "Retry-After" in r.headers
@@ -611,7 +611,7 @@ class TestRateLimit:
         target_ids = []
         for i in range(4):
             r = await client.post("/api/auth/register", json={
-                "username": f"rl_tgt_{i}", "password": "pass",
+                "username": f"rl_tgt_{i}", "password": "Pass1234",
             })
             if r.status_code == 429:
                 break
@@ -656,11 +656,11 @@ class TestOnlineStatus:
 
     async def test_user_list_includes_online_fields(self, client: AsyncClient, registered_user: dict):
         r2 = await client.post("/api/auth/register", json={
-            "username": "online_target", "password": "pass",
+            "username": "online_target", "password": "Pass1234",
         })
         target_id = r2.json()["user_id"]
         await client.post(f"/api/permissions/request/{registered_user['user_id']}", headers={
-            "Authorization": f"Bearer {r2.json()['token']}",
+            "Authorization": f"Bearer {r2.json()['access_token']}",
         })
 
         r = await client.get("/api/users", headers={

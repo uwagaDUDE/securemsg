@@ -55,11 +55,15 @@ _JWT_PREVIOUS = os.getenv("JWT_SECRET_PREVIOUS", "")
 JWT_SECRETS = [s for s in [_jwt, _JWT_PREVIOUS] if s]
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24
+ACCESS_TOKEN_EXPIRE_MINUTES = 15
+REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 VAPID_PRIVATE_KEY = _vapid_priv
 VAPID_PUBLIC_KEY = _vapid_pub
 VAPID_CLAIMS = {"sub": "mailto:admin@localhost"}
 
 SERVER_EPOCH = secrets.token_urlsafe(16)
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "https://localhost:8111,http://localhost:8111").split(",") if origin.strip()]

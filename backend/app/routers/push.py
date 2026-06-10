@@ -8,7 +8,7 @@ from ..config import VAPID_PUBLIC_KEY
 from ..database import get_db
 from ..models import PushSubscription, User
 
-router = APIRouter(prefix="/api/push", tags=["push"])
+router = APIRouter(prefix="/api/v1/push", tags=["push"])
 
 
 class PushSubscribeRequest(BaseModel):

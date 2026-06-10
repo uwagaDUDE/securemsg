@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+.venv
+venv/
+frontend/node_modules/
+*.db
+*.sqlite
+*.log
+.cache/
+tests/
+pytest.ini
+docker-compose.yml
+backend/Dockerfile
+nginx/Dockerfile
+.dockerignore

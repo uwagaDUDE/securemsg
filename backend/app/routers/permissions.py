@@ -1,5 +1,3 @@
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import or_, select
@@ -8,14 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth import get_current_user
 from ..database import get_db
 from ..models import Permission, SharedKey, User
-from ..ratelimit import RateLimiter
+from ..ratelimit import get_limiter
 from ..schemas import PermissionOut
 
-logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/v1/permissions", tags=["permissions"])
 
-router = APIRouter(prefix="/api/permissions", tags=["permissions"])
-
-_limiter = RateLimiter()
+_limiter = get_limiter()
 
 
 @router.post("/request/{user_id}", response_model=PermissionOut)
@@ -26,7 +22,7 @@ async def request_permission(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    allowed, remaining, retry_after = _limiter.check(f"perm:{current_user.id}", limit=10, window_seconds=60)
+    allowed, remaining, retry_after = await _limiter.check_async(f"perm:{current_user.id}", limit=10, window_seconds=60)
     response.headers["X-RateLimit-Limit"] = "10"
     response.headers["X-RateLimit-Remaining"] = str(remaining)
     if not allowed:

@@ -43,6 +43,36 @@ class Permission(Base):
     )
 
 
+class KeyVerification(Base):
+    __tablename__ = "key_verifications"
+    __table_args__ = (UniqueConstraint("user_id", "contact_id", name="uq_key_verification"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    contact_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    sas_hash: Mapped[str] = mapped_column(String(64))
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class KeyRotation(Base):
+    __tablename__ = "key_rotations"
+    __table_args__ = (UniqueConstraint("user_id", "epoch", name="uq_key_rotation"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    epoch: Mapped[int] = mapped_column(Integer)
+    broadcast_key: Mapped[bytes] = mapped_column(LargeBinary)
+    previous_broadcast_key: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Message(Base):
     __tablename__ = "messages"
 
@@ -55,6 +85,7 @@ class Message(Base):
     encrypted_content: Mapped[str | None] = mapped_column(Text, nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -115,6 +146,7 @@ class Channel(Base):
     owner_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    invite_code: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -211,6 +243,19 @@ class PushSubscription(Base):
     endpoint: Mapped[str] = mapped_column(Text)
     p256dh: Mapped[str] = mapped_column(Text)
     auth: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

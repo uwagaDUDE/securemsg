@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status, Query
 from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import get_current_user
+from ..auth import decode_access_token, get_current_user
 from ..database import get_db
-from ..models import Attachment, User
+from ..models import Attachment, ChannelSubscriber, GroupMember, Message, User
 
-router = APIRouter(prefix="/api/attachments", tags=["attachments"])
+router = APIRouter(prefix="/api/v1/attachments", tags=["attachments"])
 
 _MAX_SIZE = 20 * 1024 * 1024  # 20 MB
 _ALLOWED_MIME = {
@@ -49,12 +50,44 @@ async def upload_attachment(
 @router.get("/{att_id}")
 async def download_attachment(
     att_id: int,
+    token: str = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     att = await db.get(Attachment, att_id)
     if att is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
+
+    if att.message_id is None:
+        if att.uploader_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    else:
+        msg = await db.get(Message, att.message_id)
+        if msg is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if msg.type == "user":
+            if current_user.id not in (msg.sender_id, msg.receiver_id):
+                raise HTTPException(status_code=403, detail="Access denied")
+        elif msg.type == "group":
+            result = await db.execute(
+                select(GroupMember).where(
+                    (GroupMember.group_id == msg.group_chat_id) &
+                    (GroupMember.user_id == current_user.id)
+                )
+            )
+            if result.scalar_one_or_none() is None:
+                raise HTTPException(status_code=403, detail="Access denied")
+        elif msg.type == "channel":
+            result = await db.execute(
+                select(ChannelSubscriber).where(
+                    (ChannelSubscriber.channel_id == msg.channel_id) &
+                    (ChannelSubscriber.user_id == current_user.id)
+                )
+            )
+            if result.scalar_one_or_none() is None:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
 
     return Response(
         content=att.encrypted_blob,

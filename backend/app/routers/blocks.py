@@ -7,7 +7,7 @@ from ..database import get_db
 from ..models import Block, User
 from ..schemas import BlockedUserOut
 
-router = APIRouter(prefix="/api/blocks", tags=["blocks"])
+router = APIRouter(prefix="/api/v1/blocks", tags=["blocks"])
 
 
 @router.get("", response_model=list[BlockedUserOut])

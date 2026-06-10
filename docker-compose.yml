@@ -1,0 +1,64 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - redisdata:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  backend:
+    build:
+      context: .                      # repo root: backend needs root requirements.txt + frontend/
+      dockerfile: backend/Dockerfile  # recipe co-located with the service it builds
+    image: securemsg-backend
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      # SQLite lives on a named volume; updates.db is derived from this path.
+      DATABASE_URL: sqlite+aiosqlite:////data/messenger.db
+      # Requests/WS arrive same-origin through nginx on 443.
+      ALLOWED_ORIGINS: https://localhost:8443,https://127.0.0.1:8443
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - dbdata:/data
+      # Persist auto-generated secrets (JWT_SECRET, VAPID keys) across restarts.
+      # Without this, every restart invalidates all tokens and push subscriptions.
+      - ./.env:/app/.env
+    expose:
+      - "8111"          # internal only; reachable by nginx, not the host
+    healthcheck:
+      # No dedicated health route; "/" serves index.html → 200. Uses stdlib
+      # python so no extra packages are needed in the slim image.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8111/', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    image: securemsg-nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"       # HTTP → redirects to HTTPS
+      - "8443:443"      # HTTPS entry point
+    volumes:
+      - ./cert.pem:/etc/nginx/certs/cert.pem:ro
+      - ./key.pem:/etc/nginx/certs/key.pem:ro
+
+volumes:
+  dbdata:
+  redisdata:
