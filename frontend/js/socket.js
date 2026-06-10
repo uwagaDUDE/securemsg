@@ -103,6 +103,10 @@ const MESSENGER_SOCKET = (() => {
             if (handlers.onMessageDeleted) handlers.onMessageDeleted(data);
         });
 
+        socket.on("messages_read", (data) => {
+            if (handlers.onMessagesRead) handlers.onMessagesRead(data);
+        });
+
         socket.on("reaction_updated", (data) => {
             if (handlers.onReactionUpdated) handlers.onReactionUpdated(data);
         });

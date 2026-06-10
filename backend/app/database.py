@@ -57,6 +57,8 @@ async def init_db():
         cols = {row[1] for row in result}
         if "is_read" not in cols:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN is_read BOOLEAN DEFAULT 0"))
+        if "read_at" not in cols:
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN read_at DATETIME"))
         if "type" not in cols:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN type VARCHAR(16) DEFAULT 'user'"))
         if "edited_at" not in cols:
@@ -161,6 +163,8 @@ async def init_db():
         cols = {row[1] for row in result}
         if "is_read" not in cols:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN is_read BOOLEAN DEFAULT 0"))
+        if "read_at" not in cols:
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN read_at DATETIME"))
         if "type" not in cols:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN type VARCHAR(16) DEFAULT 'user'"))
         if "edited_at" not in cols:

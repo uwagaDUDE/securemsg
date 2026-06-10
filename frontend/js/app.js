@@ -822,26 +822,30 @@
             },
             onMessageEdited: (data) => {
                 const el = document.querySelector(`.message[data-msg-id="${data.message_id}"]`);
-                if (el) {
-                    const textEl = el.querySelector('.message-text');
-                    if (textEl && data.encrypted_content) {
-                        if (myBroadcastKey) {
-                            CRYPTO.decryptMessage(data.encrypted_content, myBroadcastKey).then(function (txt) {
-                                textEl.textContent = txt;
-                            });
-                        }
-                    }
-                    if (textEl && data.content) {
-                        textEl.textContent = data.content;
-                    }
-                    var tag = el.querySelector('.message-edited-tag');
-                    if (!tag) {
-                        tag = document.createElement('span');
-                        tag.className = 'message-edited-tag';
-                        tag.textContent = '(edited)';
-                        el.querySelector('.message-text')?.appendChild(tag);
-                    }
+                if (!el) return;
+                const bodyEl = el.querySelector('.message-body') || el.querySelector('.message-text');
+                if (bodyEl && data.encrypted_content && myBroadcastKey) {
+                    CRYPTO.decryptMessage(data.encrypted_content, myBroadcastKey).then(function (txt) {
+                        if (txt != null) bodyEl.textContent = txt;
+                    });
+                } else if (bodyEl && data.content) {
+                    bodyEl.textContent = data.content;
                 }
+                const meta = el.querySelector('.message-meta');
+                if (meta && !meta.querySelector('.meta-edited')) {
+                    const ed = document.createElement('span');
+                    ed.className = 'meta-edited';
+                    ed.textContent = 'edited';
+                    meta.insertBefore(ed, meta.firstChild);
+                }
+            },
+            onMessagesRead: (data) => {
+                if (activeChatId !== data.reader_id) return;
+                document.querySelectorAll('#messages .message.mine .meta-check').forEach(function (c) {
+                    c.classList.add('read');
+                    c.textContent = '✓✓';
+                    if (data.read_at) c.title = 'Read ' + new Date(data.read_at).toLocaleString();
+                });
             },
             onMessageDeleted: (data) => {
                 const el = document.querySelector(`.message[data-msg-id="${data.message_id}"]`);
@@ -849,8 +853,8 @@
                     if (data.delete_for_all) {
                         el.remove();
                     } else {
-                        const textEl = el.querySelector('.message-text');
-                        if (textEl) textEl.textContent = '[Message deleted]';
+                        const bodyEl = el.querySelector('.message-body') || el.querySelector('.message-text');
+                        if (bodyEl) bodyEl.textContent = '[Message deleted]';
                         el.classList.add('deleted');
                     }
                 }
@@ -1375,6 +1379,32 @@
     }
 
     // ── messages ──
+    function buildMessageMeta(msg, isMine, onImage) {
+        const meta = document.createElement("span");
+        meta.className = "message-meta" + (onImage ? " on-image" : "");
+
+        if (msg.edited_at) {
+            const ed = document.createElement("span");
+            ed.className = "meta-edited";
+            ed.textContent = "edited";
+            meta.appendChild(ed);
+        }
+
+        const t = document.createElement("span");
+        t.className = "meta-time";
+        t.textContent = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        meta.appendChild(t);
+
+        if (isMine) {
+            const check = document.createElement("span");
+            check.className = "meta-check" + (msg.is_read ? " read" : "");
+            check.textContent = msg.is_read ? "✓✓" : "✓";
+            if (msg.read_at) check.title = "Read " + new Date(msg.read_at).toLocaleString();
+            meta.appendChild(check);
+        }
+        return meta;
+    }
+
     async function renderMessages(peerId) {
         const token = localStorage.getItem("token");
         const res = await apiFetch(`/api/messages/${peerId}`, {
@@ -1414,27 +1444,38 @@
             if (displayText === null || displayText === undefined) displayText = "[Encrypted message]";
 
             var hasAttachments = msg.attachments && msg.attachments.length > 0;
+            var bodyText = "";
+            var quoteClean = null;
 
             if (displayText.startsWith('> ')) {
                 var sepIdx = displayText.indexOf('\n\n');
                 if (sepIdx > 0) {
                     var quoteRaw = displayText.substring(0, sepIdx);
-                    var replyBody = displayText.substring(sepIdx + 2);
-                    var quoteClean = quoteRaw.split('\n').map(function (line) {
+                    bodyText = displayText.substring(sepIdx + 2);
+                    quoteClean = quoteRaw.split('\n').map(function (line) {
                         return line.startsWith('> ') ? line.substring(2) : line;
                     }).join('\n');
-                    var quoteEl = document.createElement('div');
-                    quoteEl.className = 'message-quote';
-                    quoteEl.textContent = quoteClean;
-                    div.appendChild(quoteEl);
-                    text.textContent = replyBody;
                 } else {
-                    text.textContent = displayText;
+                    bodyText = displayText;
                 }
             } else if (displayText || !hasAttachments) {
-                text.textContent = displayText;
+                bodyText = displayText;
             }
-            if (text.textContent) {
+
+            if (quoteClean !== null) {
+                var quoteEl = document.createElement('div');
+                quoteEl.className = 'message-quote';
+                quoteEl.textContent = quoteClean;
+                text.appendChild(quoteEl);
+            }
+
+            var bodyEl = document.createElement('span');
+            bodyEl.className = 'message-body';
+            bodyEl.textContent = bodyText;
+            text.appendChild(bodyEl);
+
+            if (bodyText || quoteClean !== null) {
+                text.appendChild(buildMessageMeta(msg, isMine, false));
                 div.appendChild(text);
             }
 
@@ -1466,6 +1507,9 @@
                         }
                     });
                 });
+                if (!bodyText && quoteClean === null) {
+                    attDiv.appendChild(buildMessageMeta(msg, isMine, true));
+                }
                 div.appendChild(attDiv);
             }
 
@@ -1482,11 +1526,6 @@
                     text: msgText
                 });
             });
-
-            const time = document.createElement("div");
-            time.className = "message-time";
-            const readMark = isMine ? (msg.is_read ? " ✓✓" : " ✓") : "";
-            time.textContent = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + readMark;
 
             container.appendChild(div);
         }
@@ -2258,7 +2297,7 @@
                             bansList.appendChild(bDiv);
                         });
                     } else {
-                        bansList.innerHTML = '<span style="color:#5a5a6e;font-size:11px;">No banned users</span>';
+                        bansList.innerHTML = '<span style="color:#7c7c90;font-size:11px;">No banned users</span>';
                     }
                 } catch (e) { console.error("loadBans failed:", e); }
             } else {

@@ -83,6 +83,7 @@ class MessageOut(BaseModel):
     encrypted_content: str | None = None
     content: str | None = None
     is_read: bool
+    read_at: datetime | None = None
     edited_at: datetime | None = None
     deleted_at: datetime | None = None
     created_at: datetime

@@ -18,6 +18,7 @@
 <body>
 
     <div id="login-page" class="auth-page">
+        <img class="auth-logo" src="/favicon.png" alt="Secure Messenger" />
         <h2>Secure Messenger</h2>
         <input id="login-username" type="text" placeholder="Username" autocomplete="off" />
         <input id="login-password" type="password" placeholder="Password" />
@@ -32,6 +33,7 @@
     </div>
 
     <div id="register-page" class="auth-page hidden">
+        <img class="auth-logo" src="/favicon.png" alt="Secure Messenger" />
         <h2>Create Account</h2>
         <input id="reg-username" type="text" placeholder="Choose a username" autocomplete="off" />
         <input id="reg-password" type="password" placeholder="Choose a password" />
@@ -90,8 +92,8 @@
                     </div>
                     <div id="channel-list" class="user-list"></div>
                     <button id="create-channel-btn" class="create-entity-btn" onclick="showCreateChannelDialog()">+ Create Channel</button>
-                    <button class="create-entity-btn" onclick="showCreateGroupDialog()" style="border-color: rgba(0,255,136,0.08);">+ Create Group</button>
-                    <button class="create-entity-btn" onclick="showJoinGroupDialog()" style="border-color: rgba(0,180,255,0.08);">+ Join Group</button>
+                    <button class="create-entity-btn" onclick="showCreateGroupDialog()" style="border-color: rgba(52, 211, 153,0.08);">+ Create Group</button>
+                    <button class="create-entity-btn" onclick="showJoinGroupDialog()" style="border-color: rgba(34, 211, 238,0.08);">+ Join Group</button>
                 </div>
                 <div id="tab-content-blocked" class="tab-content hidden">
                     <div id="blocked-list" class="user-list"></div>

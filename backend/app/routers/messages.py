@@ -37,13 +37,22 @@ async def mark_read(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await db.execute(
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
         Message.__table__.update().where(
             (Message.sender_id == user_id) & (Message.receiver_id == current_user.id) & (Message.is_read == False)
-        ).values(is_read=True)
+        ).values(is_read=True, read_at=now)
     )
-    current_user.last_seen = datetime.now(timezone.utc)
+    current_user.last_seen = now
     await db.commit()
+
+    # notify the sender so their read receipts (✓✓) update in real time
+    if result.rowcount:
+        await sio.emit(
+            "messages_read",
+            {"reader_id": current_user.id, "read_at": now.isoformat()},
+            room=f"user_{user_id}",
+        )
 
 
 @router.get("/{user_id}", response_model=list[MessageOut])
@@ -133,6 +142,7 @@ async def get_history(
             encrypted_content=m.encrypted_content,
             content=m.content,
             is_read=m.is_read,
+            read_at=m.read_at,
             edited_at=m.edited_at,
             deleted_at=m.deleted_at,
             created_at=m.created_at,
