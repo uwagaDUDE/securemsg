@@ -4,14 +4,19 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import base64
+import secrets
+from datetime import datetime, timezone
+from fastapi import HTTPException
+
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import Block, Permission, User
+from ..models import Block, KeyRotation, Permission, User
 from ..schemas import UserOut
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/users", tags=["users"])
+router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 
 async def _attach_permission_status(users: list[User], current_user: User, db: AsyncSession) -> list[UserOut]:
@@ -87,6 +92,54 @@ async def list_users(
     )
     users = result.scalars().all()
     return await _attach_permission_status(users, current_user, db)
+
+
+@router.post("/rotate-key")
+async def rotate_broadcast_key(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.broadcast_key is None:
+        raise HTTPException(status_code=400, detail="No broadcast key set")
+
+    latest = await db.execute(
+        select(KeyRotation).where(KeyRotation.user_id == current_user.id).order_by(KeyRotation.epoch.desc())
+    )
+    latest_rotation = latest.scalar_one_or_none()
+    next_epoch = (latest_rotation.epoch + 1) if latest_rotation else 1
+
+    rotation = KeyRotation(
+        user_id=current_user.id,
+        epoch=next_epoch,
+        broadcast_key=current_user.broadcast_key,
+        previous_broadcast_key=latest_rotation.broadcast_key if latest_rotation else None,
+    )
+    db.add(rotation)
+
+    current_user.broadcast_key = secrets.token_bytes(32)
+
+    await db.commit()
+
+    return {"ok": True, "epoch": next_epoch}
+
+
+@router.get("/key-rotations")
+async def get_key_rotations(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(KeyRotation).where(KeyRotation.user_id == current_user.id).order_by(KeyRotation.epoch.desc())
+    )
+    rotations = result.scalars().all()
+    return [
+        {
+            "epoch": r.epoch,
+            "created_at": r.created_at,
+            "rotated_at": r.rotated_at,
+        }
+        for r in rotations
+    ]
 
 
 @router.get("/search", response_model=list[UserOut])

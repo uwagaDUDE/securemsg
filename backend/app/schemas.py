@@ -35,7 +35,9 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    token: str
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
     user_id: int
     username: str
 
@@ -108,6 +110,11 @@ class SendMessageRequest(BaseModel):
     attachment_ids: list[int] = []
 
 
+class ChannelPostRequest(BaseModel):
+    content: str
+    attachment_ids: list[int] = []
+
+
 class PermissionOut(BaseModel):
     id: int
     owner_id: int
@@ -139,6 +146,7 @@ class ChannelOut(BaseModel):
     owner_id: int
     description: str | None = None
     is_system: bool = False
+    invite_code: str | None = None
     subscriber_count: int = 0
     is_subscribed: bool = False
     created_at: datetime
@@ -204,3 +212,32 @@ class ChangelogEntryOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class KeyVerificationOut(BaseModel):
+    id: int
+    user_id: int
+    contact_id: int
+    sas_hash: str
+    verified: bool
+    verified_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ComputeSASRequest(BaseModel):
+    contact_id: int
+
+
+class ComputeSASResponse(BaseModel):
+    sas: str
+
+
+class VerifySASRequest(BaseModel):
+    contact_id: int
+    sas: str
+
+
+class VerifySASResponse(BaseModel):
+    verified: bool

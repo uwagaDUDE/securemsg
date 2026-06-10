@@ -10,7 +10,7 @@ import socketio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.app.auth import create_token, decode_token
+from backend.app.auth import create_access_token, decode_access_token
 
 pytestmark = pytest.mark.asyncio
 
@@ -62,13 +62,13 @@ async def _collect_events(client: socketio.AsyncSimpleClient, count: int, timeou
 class TestTokenUnit:
     async def test_valid_token_can_be_decoded(self, registered_user_alice):
         token = registered_user_alice["token"]
-        payload = decode_token(token)
+        payload = decode_access_token(token)
         assert payload["user_id"] == registered_user_alice["user_id"]
 
     async def test_invalid_token_raises(self):
         from fastapi import HTTPException
         with pytest.raises(HTTPException):
-            decode_token("invalid.token.here")
+            decode_access_token("invalid.token.here")
 
 
 # ── Socket Auth ──
@@ -91,7 +91,7 @@ class TestSocketAuth:
             await c.connect(SERVER_URL, auth={}, transports=["websocket"])
 
     async def test_nonexistent_user_rejected(self, _run_server):
-        token = create_token(99999)
+        token = create_access_token(99999)
         c = socketio.AsyncSimpleClient()
         with pytest.raises(Exception):
             await c.connect(SERVER_URL, auth={"token": token}, transports=["websocket"])

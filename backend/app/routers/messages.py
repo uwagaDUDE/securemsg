@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from datetime import datetime, timedelta, timezone
+
+from sqlalchemy.orm import selectinload
 
 from ..auth import get_current_user
 from ..database import get_db
@@ -11,7 +11,7 @@ from ..models import KeyRequest, Message, MessageReaction, MessageVisibility, Sh
 from ..schemas import EditMessageRequest, MessageOut, ReactionRequest, SendMessageRequest, SharedKeyOut
 from ..socketio import _do_send_message, sio
 
-router = APIRouter(prefix="/api/messages", tags=["messages"])
+router = APIRouter(prefix="/api/v1/messages", tags=["messages"])
 
 
 @router.get("/unread-counts")
@@ -58,7 +58,7 @@ async def mark_read(
 @router.get("/{user_id}", response_model=list[MessageOut])
 async def get_history(
     user_id: int,
-    before_id: int = None,
+    before_id: int | None = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -306,7 +306,8 @@ async def edit_message(
         raise HTTPException(status_code=400, detail="Cannot edit system messages")
 
     ten_min_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
-    if msg.created_at < ten_min_ago:
+    msg_dt = msg.created_at.replace(tzinfo=timezone.utc) if msg.created_at.tzinfo is None else msg.created_at
+    if msg_dt < ten_min_ago:
         raise HTTPException(status_code=400, detail="Can only edit within 10 minutes of sending")
 
     if body.encrypted_content is not None:
@@ -316,6 +317,7 @@ async def edit_message(
     msg.edited_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(msg)
+    await db.refresh(msg, ["attachments", "reactions"])
 
     if msg.receiver_id:
         room = f"room_{min(current_user.id, msg.receiver_id)}_{max(current_user.id, msg.receiver_id)}"
@@ -360,7 +362,8 @@ async def delete_message(
 
     if delete_for_all:
         hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-        if msg.created_at < hour_ago:
+        msg_dt = msg.created_at.replace(tzinfo=timezone.utc) if msg.created_at.tzinfo is None else msg.created_at
+        if msg_dt < hour_ago:
             raise HTTPException(status_code=400, detail="Can only delete for all within 1 hour of sending")
         receiver_id = msg.receiver_id
         group_chat_id = msg.group_chat_id
@@ -451,7 +454,6 @@ async def remove_reaction(
 
 
 async def _get_reactions(db: AsyncSession, message_id: int) -> list[dict]:
-    from sqlalchemy import func
     result = await db.execute(
         select(MessageReaction.emoji, func.count(MessageReaction.id).label("count"))
         .where(MessageReaction.message_id == message_id)

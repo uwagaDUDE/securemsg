@@ -11,11 +11,12 @@ ENV PYTHONUNBUFFERED=1 \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code. frontend/ is also copied because main.py mounts it as a
-# StaticFiles fallback; nginx serves it in production, so this is just a safety net.
+# Application code.
 COPY backend ./backend
-COPY frontend ./frontend
 COPY run.py ./
+
+# Ensure .env exists so bind mount works correctly (Docker creates dir if file missing).
+RUN touch /app/.env
 
 EXPOSE 8111
 

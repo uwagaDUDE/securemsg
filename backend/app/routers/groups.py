@@ -1,13 +1,13 @@
 import secrets
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_user
 from ..database import get_db
-from ..models import GroupBan, GroupChat, GroupMember, GroupSharedKey, Message, User
+from ..models import Attachment, GroupBan, GroupChat, GroupMember, GroupSharedKey, Message, User
 from ..schemas import (
     GroupBanOut,
     GroupChatCreateRequest,
@@ -19,7 +19,7 @@ from ..schemas import (
 )
 from ..socketio import sio
 
-router = APIRouter(prefix="/api/groups", tags=["groups"])
+router = APIRouter(prefix="/api/v1/groups", tags=["groups"])
 
 
 async def _group_to_out(g: GroupChat, current_user_id: int, db: AsyncSession) -> GroupChatOut:
@@ -431,7 +431,7 @@ async def get_group_shared_key(
 @router.get("/{group_id}/messages", response_model=list[MessageOut])
 async def get_group_messages(
     group_id: int,
-    before_id: int = None,
+    before_id: int | None = None,
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -467,6 +467,7 @@ async def get_group_messages(
 
     stmt = (
         select(Message)
+        .options(selectinload(Message.attachments), selectinload(Message.reactions))
         .where(Message.id.in_(select(sub.c.id)))
         .order_by(Message.created_at, Message.id)
     )
@@ -480,8 +481,14 @@ async def get_group_messages(
         for uid, uname in umap:
             username_map[uid] = uname
 
-    return [
-        MessageOut(
+    out = []
+    for m in messages:
+        if m.deleted_at is not None:
+            continue
+        reaction_counts: dict[str, int] = {}
+        for r in m.reactions:
+            reaction_counts[r.emoji] = reaction_counts.get(r.emoji, 0) + 1
+        out.append(MessageOut(
             id=m.id,
             sender_id=m.sender_id,
             group_chat_id=m.group_chat_id,
@@ -493,10 +500,10 @@ async def get_group_messages(
             deleted_at=m.deleted_at,
             created_at=m.created_at,
             sender_username=username_map.get(m.sender_id),
-        )
-        for m in messages
-        if m.deleted_at is None
-    ]
+            attachments=[{"id": a.id, "mime_type": a.mime_type, "compressed_size": a.compressed_size} for a in m.attachments],
+            reactions=[{"emoji": e, "count": c, "user_id": 0} for e, c in reaction_counts.items()],
+        ))
+    return out
 
 
 @router.post("/{group_id}/send", response_model=MessageOut)
@@ -521,8 +528,21 @@ async def send_group_message(
         encrypted_content=body.encrypted_content,
     )
     db.add(msg)
+    await db.flush()
+
+    att_info = []
+    for att_id in body.attachment_ids:
+        att = await db.get(Attachment, att_id)
+        if att is not None and att.uploader_id == current_user.id and att.message_id is None:
+            att.message_id = msg.id
+            att_info.append({
+                "id": att.id,
+                "mime_type": att.mime_type,
+                "compressed_size": att.compressed_size,
+            })
+
     await db.commit()
-    await db.refresh(msg)
+    await db.refresh(msg, ["attachments"])
 
     payload = {
         "id": msg.id,
@@ -532,7 +552,7 @@ async def send_group_message(
         "type": "group",
         "encrypted_content": body.encrypted_content,
         "created_at": msg.created_at.isoformat(),
-        "attachments": [],
+        "attachments": att_info,
         "reactions": [],
     }
     await sio.emit("new_group_message", payload, room=f"group_{group_id}")
@@ -546,4 +566,5 @@ async def send_group_message(
         is_read=msg.is_read,
         created_at=msg.created_at,
         sender_username=current_user.username,
+        attachments=[{"id": a.id, "mime_type": a.mime_type, "compressed_size": a.compressed_size} for a in msg.attachments],
     )

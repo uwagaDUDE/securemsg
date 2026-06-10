@@ -3,12 +3,26 @@ import json
 from datetime import datetime, timezone
 
 import socketio
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 
-from .auth import decode_token
+from .auth import decode_access_token
 from .config import ALLOWED_ORIGINS, VAPID_CLAIMS, VAPID_PRIVATE_KEY
 from .database import async_session
-from .models import Attachment, GroupChat, GroupMember, GroupSharedKey, Message, Permission, PushSubscription, SharedKey, User
+from .logging_config import get_logger
+from .metrics import active_websocket_connections
+from .models import Attachment, GroupMember, GroupSharedKey, Message, Permission, PushSubscription, SharedKey, User
+from .socket_schemas import (
+    ConnectAuth,
+    GetUserStatusData,
+    JoinRoomData,
+    PermissionRequestedData,
+    PermissionRespondedData,
+    SendMessageData,
+    ShareGroupKeyData,
+    ShareKeyData,
+    TypingData,
+)
 
 try:
     from pywebpush import webpush, WebPushException
@@ -23,14 +37,19 @@ sio = socketio.AsyncServer(
 )
 
 _user_sessions: dict[int, int] = {}
+logger = get_logger(__name__)
 
 
 @sio.event
 async def connect(sid, environ, auth):
-    if auth is None or "token" not in auth:
-        raise socketio.exceptions.ConnectionRefusedError("Missing token")
     try:
-        payload = decode_token(auth["token"])
+        auth_data = ConnectAuth.model_validate(auth or {})
+    except ValidationError as e:
+        logger.warning("Invalid connect auth", errors=e.errors())
+        raise socketio.exceptions.ConnectionRefusedError("Invalid auth format")
+
+    try:
+        payload = decode_access_token(auth_data.token)
     except Exception:
         raise socketio.exceptions.ConnectionRefusedError("Invalid token")
 
@@ -72,7 +91,8 @@ async def connect(sid, environ, auth):
                 await sio.emit("user_status", {"user_id": user_id, "is_online": True, "last_seen": now.isoformat()}, room=room)
 
     await sio.enter_room(sid, f"user_{user_id}")
-    print(f"[connect] user {user_id} sid={sid} (sessions: {_user_sessions[user_id]})")
+    active_websocket_connections.inc()
+    logger.info("WebSocket connected", user_id=user_id, sid=sid, sessions=_user_sessions[user_id])
 
 
 @sio.event
@@ -116,25 +136,32 @@ async def disconnect(sid):
                             room = _room_name(user_id, other_id)
                             await sio.emit("user_status", {"user_id": user_id, "is_online": False, "last_seen": now.isoformat()}, room=room)
 
-        print(f"[disconnect] user {user_id} sid={sid} (sessions: {_user_sessions.get(user_id, 0)})")
+        active_websocket_connections.dec()
+        logger.info("WebSocket disconnected", user_id=user_id, sid=sid, sessions=_user_sessions.get(user_id, 0))
     except KeyError:
-        print(f"[disconnect] unknown sid={sid}")
+        logger.warning("WebSocket disconnected with unknown session", sid=sid)
 
 
 @sio.event
 async def join_room(sid, data):
     """data: { target_id } for DMs, or { group_id } for group chats"""
+    try:
+        join_data = JoinRoomData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid join_room data", errors=e.errors())
+        return
+
     session = await sio.get_session(sid)
     user_id = session["user_id"]
 
-    if "target_id" in data and data["target_id"]:
-        target_id = data["target_id"]
+    if join_data.target_id:
+        target_id = join_data.target_id
         room = _room_name(user_id, target_id)
         await sio.enter_room(sid, room)
-        print(f"[join_room] {user_id}+{target_id} room={room}")
+        logger.debug("User joined DM room", user_id=user_id, target_id=target_id, room=room)
 
-    if "group_id" in data and data["group_id"]:
-        group_id = data["group_id"]
+    if join_data.group_id:
+        group_id = join_data.group_id
         async with async_session() as db:
             gm_result = await db.execute(
                 select(GroupMember).where(
@@ -143,20 +170,26 @@ async def join_room(sid, data):
             )
             if gm_result.scalar_one_or_none():
                 await sio.enter_room(sid, f"group_{group_id}")
-                print(f"[join_room] {user_id} joined group_{group_id}")
+                logger.debug("User joined group", user_id=user_id, group_id=group_id)
 
-    if "channel_id" in data and data["channel_id"]:
-        channel_id = data["channel_id"]
+    if join_data.channel_id:
+        channel_id = join_data.channel_id
         await sio.enter_room(sid, f"channel_{channel_id}")
-        print(f"[join_room] {user_id} joined channel_{channel_id}")
+        logger.debug("User joined channel", user_id=user_id, channel_id=channel_id)
 
 
 @sio.event
 async def send_message(sid, data):
     """data: { receiver_id, encrypted_content, attachment_ids?: int[] }"""
+    try:
+        msg_data = SendMessageData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid send_message data", errors=e.errors())
+        return {"error": "invalid_data", "detail": "Invalid message format"}
+
     session = await sio.get_session(sid)
     sender_id = session["user_id"]
-    return await _do_send_message(sender_id, data)
+    return await _do_send_message(sender_id, msg_data.model_dump())
 
 
 async def _do_send_message(sender_id: int, data: dict) -> dict:
@@ -175,12 +208,12 @@ async def _do_send_message(sender_id: int, data: dict) -> dict:
             )
         )
         if not result.scalar_one_or_none():
-            print(f"[send_message] BLOCKED {sender_id} -> {receiver_id}: no permission")
+            logger.warning("Message blocked: no permission", sender_id=sender_id, receiver_id=receiver_id)
             return {"error": "no_permission", "detail": f"No approved permission between {sender_id} and {receiver_id}"}
 
         receiver_user = await db.get(User, receiver_id)
         if receiver_user is None:
-            print(f"[send_message] BLOCKED {sender_id} -> {receiver_id}: receiver not found")
+            logger.warning("Message blocked: receiver not found", sender_id=sender_id, receiver_id=receiver_id)
             return {"error": "receiver_not_found", "detail": f"User {receiver_id} not found"}
 
         msg = Message(
@@ -220,7 +253,7 @@ async def _do_send_message(sender_id: int, data: dict) -> dict:
 
     room = _room_name(sender_id, receiver_id)
     await sio.emit("new_message", payload, room=room)
-    print(f"[send_message] {sender_id} -> {receiver_id} ({len(att_info)} atts)")
+    logger.info("Message sent", sender_id=sender_id, receiver_id=receiver_id, attachment_count=len(att_info))
 
     await _send_push_notification(receiver_id, sender.username, encrypted_content)
 
@@ -230,13 +263,19 @@ async def _do_send_message(sender_id: int, data: dict) -> dict:
 @sio.event
 async def typing(sid, data):
     """data: { receiver_id, is_typing: bool }"""
+    try:
+        typing_data = TypingData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid typing data", errors=e.errors())
+        return
+
     session = await sio.get_session(sid)
     sender_id = session["user_id"]
-    receiver_id = data["receiver_id"]
+    receiver_id = typing_data.receiver_id
     room = _room_name(sender_id, receiver_id)
     await sio.emit(
         "typing",
-        {"user_id": sender_id, "is_typing": data["is_typing"]},
+        {"user_id": sender_id, "is_typing": typing_data.is_typing},
         room=room,
         skip_sid=sid,
     )
@@ -245,14 +284,23 @@ async def typing(sid, data):
 @sio.event
 async def share_key(sid, data):
     """data: { target_id, encrypted_broadcast_key }"""
+    try:
+        key_data = ShareKeyData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid share_key data", errors=e.errors())
+        return
+
     session = await sio.get_session(sid)
     owner_id = session["user_id"]
-    target_id = data["target_id"]
+    target_id = key_data.target_id
 
-    encrypted_bytes = base64.b64decode(data["encrypted_broadcast_key"])
+    try:
+        encrypted_bytes = base64.b64decode(key_data.encrypted_broadcast_key)
+    except Exception as e:
+        logger.warning("Invalid base64 in share_key", error=str(e))
+        return
 
     async with async_session() as db:
-        # check permission
         result = await db.execute(
             select(Permission).where(
                 or_(
@@ -262,7 +310,7 @@ async def share_key(sid, data):
             )
         )
         if not result.scalar_one_or_none():
-            print(f"[share_key] BLOCKED {owner_id} -> {target_id}: no permission")
+            logger.warning("Key share blocked: no permission", owner_id=owner_id, target_id=target_id)
             return
 
         result = await db.execute(
@@ -280,31 +328,34 @@ async def share_key(sid, data):
                 encrypted_broadcast_key=encrypted_bytes,
             )
             db.add(sk)
+
+        session_data = await sio.get_session(sid)
+        sys_msg = Message(
+            sender_id=owner_id,
+            receiver_id=target_id,
+            type="system",
+            encrypted_content=f"{session_data.get('username', 'User')} shared their key",
+        )
+        db.add(sys_msg)
         await db.commit()
-
-    session_data = await sio.get_session(sid)
-
-    # persist system message
-    sys_msg = Message(
-        sender_id=owner_id,
-        receiver_id=target_id,
-        type="system",
-        encrypted_content=f"{session_data.get('username', 'User')} shared their key",
-    )
-    db.add(sys_msg)
-    await db.commit()
 
     room = _room_name(owner_id, target_id)
     await sio.emit("key_shared", {"owner_id": owner_id, "owner_username": session_data.get("username", "")}, room=room)
-    print(f"[share_key] {owner_id} -> {target_id}")
+    logger.info("Key shared", owner_id=owner_id, target_id=target_id)
 
 
 @sio.event
 async def permission_requested(sid, data):
     """data: { owner_id } — sent by requester to notify owner of a pending request"""
+    try:
+        perm_data = PermissionRequestedData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid permission_requested data", errors=e.errors())
+        return
+
     session = await sio.get_session(sid)
     requester_id = session["user_id"]
-    owner_id = data["owner_id"]
+    owner_id = perm_data.owner_id
 
     async with async_session() as db:
         requester = await db.get(User, requester_id)
@@ -316,16 +367,22 @@ async def permission_requested(sid, data):
 
     room = _room_name(requester_id, owner_id)
     await sio.emit("permission_request", payload, room=room)
-    print(f"[permission_requested] {requester_id} -> {owner_id}")
+    logger.info("Permission requested", requester_id=requester_id, owner_id=owner_id)
 
 
 @sio.event
 async def permission_responded(sid, data):
     """data: { requester_id, status: 'approved'|'rejected' } — sent by owner after responding"""
+    try:
+        perm_data = PermissionRespondedData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid permission_responded data", errors=e.errors())
+        return
+
     session = await sio.get_session(sid)
     owner_id = session["user_id"]
-    requester_id = data["requester_id"]
-    status = data["status"]
+    requester_id = perm_data.requester_id
+    status = perm_data.status
 
     payload = {
         "owner_id": owner_id,
@@ -335,13 +392,19 @@ async def permission_responded(sid, data):
 
     room = _room_name(owner_id, requester_id)
     await sio.emit("permission_response", payload, room=room)
-    print(f"[permission_responded] {owner_id} -> {requester_id}: {status}")
+    logger.info("Permission responded", owner_id=owner_id, requester_id=requester_id, status=status)
 
 
 @sio.event
 async def get_user_status(sid, data):
     """data: { user_id } — returns online status and last_seen for a user"""
-    target_id = data["user_id"]
+    try:
+        status_data = GetUserStatusData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid get_user_status data", errors=e.errors())
+        return {"error": "invalid_data"}
+
+    target_id = status_data.user_id
     async with async_session() as db:
         user = await db.get(User, target_id)
         if user is None:
@@ -360,12 +423,22 @@ def _room_name(a: int, b: int) -> str:
 @sio.event
 async def share_group_key(sid, data):
     """data: { group_id, target_id, encrypted_broadcast_key }"""
+    try:
+        key_data = ShareGroupKeyData.model_validate(data or {})
+    except ValidationError as e:
+        logger.warning("Invalid share_group_key data", errors=e.errors())
+        return
+
     session = await sio.get_session(sid)
     owner_id = session["user_id"]
-    group_id = data["group_id"]
-    target_id = data["target_id"]
+    group_id = key_data.group_id
+    target_id = key_data.target_id
 
-    encrypted_bytes = base64.b64decode(data["encrypted_broadcast_key"])
+    try:
+        encrypted_bytes = base64.b64decode(key_data.encrypted_broadcast_key)
+    except Exception as e:
+        logger.warning("Invalid base64 in share_group_key", error=str(e))
+        return
 
     async with async_session() as db:
         gm_result = await db.execute(
@@ -402,7 +475,7 @@ async def share_group_key(sid, data):
         "target_id": target_id,
         "owner_username": session.get("username", ""),
     }, room=f"group_{group_id}")
-    print(f"[share_group_key] {owner_id} -> {target_id} in group {group_id}")
+    logger.info("Group key shared", owner_id=owner_id, target_id=target_id, group_id=group_id)
 
 
 async def _send_push_notification(user_id: int, sender_name: str, encrypted_content: str):
@@ -442,9 +515,9 @@ async def _send_push_notification(user_id: int, sender_name: str, encrypted_cont
             vapid_claims=VAPID_CLAIMS,
             timeout=10,
         )
-        print(f"[push] sent to user {user_id}")
+        logger.info("Push notification sent", user_id=user_id)
     except Exception as e:
-        print(f"[push] failed for user {user_id}: {e}")
+        logger.error("Push notification failed", user_id=user_id, error=str(e))
         if WebPushException is not None and isinstance(e, WebPushException):
             if e.response and e.response.status_code in (404, 410):
                 async with async_session() as db2:
