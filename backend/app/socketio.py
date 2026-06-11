@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from .auth import decode_token
 from .config import ALLOWED_ORIGINS, VAPID_CLAIMS, VAPID_PRIVATE_KEY
 from .database import async_session
-from .models import Attachment, GroupChat, GroupMember, GroupSharedKey, Message, Permission, PushSubscription, SharedKey, User
+from .models import Attachment, Block, GroupChat, GroupMember, GroupSharedKey, Message, Permission, PushSubscription, SharedKey, User
 
 try:
     from pywebpush import webpush, WebPushException
@@ -177,6 +177,15 @@ async def _do_send_message(sender_id: int, data: dict) -> dict:
         if not result.scalar_one_or_none():
             print(f"[send_message] BLOCKED {sender_id} -> {receiver_id}: no permission")
             return {"error": "no_permission", "detail": f"No approved permission between {sender_id} and {receiver_id}"}
+
+        block_check = await db.execute(
+            select(Block).where(
+                (Block.blocker_id == receiver_id) & (Block.blocked_id == sender_id)
+            )
+        )
+        if block_check.scalar_one_or_none():
+            print(f"[send_message] BLOCKED {sender_id} -> {receiver_id}: blocked by receiver")
+            return {"error": "blocked", "detail": "You have been blocked by this user"}
 
         receiver_user = await db.get(User, receiver_id)
         if receiver_user is None:

@@ -14,7 +14,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-async def _attach_permission_status(users: list[User], current_user: User, db: AsyncSession) -> list[UserOut]:
+async def _attach_permission_status(
+    users: list[User],
+    current_user: User,
+    db: AsyncSession,
+    blocked_ids: set[int] | None = None,
+) -> list[UserOut]:
     if not users:
         return []
 
@@ -34,6 +39,12 @@ async def _attach_permission_status(users: list[User], current_user: User, db: A
     )
     requester_perms: dict[int, str] = {p.owner_id: p.status for p in result2.scalars().all()}
 
+    if blocked_ids is None:
+        blocked_result = await db.execute(
+            select(Block.blocked_id).where(Block.blocker_id == current_user.id)
+        )
+        blocked_ids = {row[0] for row in blocked_result}
+
     out = []
     for u in users:
         status = owner_perms.get(u.id) or requester_perms.get(u.id) or "none"
@@ -44,6 +55,7 @@ async def _attach_permission_status(users: list[User], current_user: User, db: A
             encrypted_private_key=u.encrypted_private_key,
             broadcast_key=u.broadcast_key,
             permission_status=status,
+            is_blocked=u.id in blocked_ids,
             is_online=u.is_online,
             last_seen=u.last_seen,
         ))
@@ -86,7 +98,7 @@ async def list_users(
         select(User).where(User.id.in_(related_ids)).order_by(User.username)
     )
     users = result.scalars().all()
-    return await _attach_permission_status(users, current_user, db)
+    return await _attach_permission_status(users, current_user, db, blocked_ids=blocked_ids)
 
 
 @router.get("/search", response_model=list[UserOut])
@@ -96,18 +108,11 @@ async def search_users(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        blocked_result = await db.execute(
-            select(Block.blocked_id).where(Block.blocker_id == current_user.id)
-        )
-        blocked_ids = {row[0] for row in blocked_result}
-
         stmt = select(User).where(User.id != current_user.id)
         if q:
             escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             pattern = f"%{escaped}%"
             stmt = stmt.where(func.lower(User.username).like(func.lower(pattern), escape="\\"))
-        if blocked_ids:
-            stmt = stmt.where(User.id.notin_(blocked_ids))
         stmt = stmt.order_by(User.username)
         result = await db.execute(stmt)
         users = result.scalars().all()

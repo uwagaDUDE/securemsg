@@ -1240,6 +1240,11 @@ body::after {
     color: #5a5a6e !important;
 }
 
+.status-blocked {
+    color: #ff3355 !important;
+    opacity: 0.7;
+}
+
 .btn-request {
     padding: 4px 12px;
     background: rgba(0, 255, 136, 0.06);
@@ -2099,4 +2104,57 @@ body::after {
     color: #9a9aae;
     font-size: 13px;
     flex: 1;
+}
+
+.settings-wrapper {
+    position: relative;
+}
+
+.settings-btn {
+    padding: 6px 12px;
+    background: rgba(0, 255, 136, 0.06);
+    color: #00ff88;
+    border: 1px solid rgba(0, 255, 136, 0.15);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    min-height: 36px;
+    transition: background 0.2s;
+}
+
+.settings-btn:hover {
+    background: rgba(0, 255, 136, 0.12);
+}
+
+.settings-dropdown {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 350;
+    background: rgba(14, 14, 22, 0.96);
+    border: 1px solid rgba(0, 255, 136, 0.15);
+    border-radius: 10px;
+    padding: 6px 0;
+    min-width: 170px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(16px);
+}
+
+.settings-dropdown .context-menu-item {
+    cursor: pointer;
+}
+
+#blocked-modal-list {
+    max-height: 60vh;
+    overflow-y: auto;
+    margin-bottom: 8px;
+}
+
+#blocked-modal-list .request-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 4px;
+    border-bottom: 1px solid rgba(0, 255, 136, 0.04);
+    min-height: 44px;
 }

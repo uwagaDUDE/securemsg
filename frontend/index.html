@@ -54,6 +54,12 @@
             <div class="user-info">
                 <span id="user-greeting"></span>
                 <button id="notif-toggle" onclick="toggleNotifications()" title="Toggle notifications">🔔</button>
+                <div class="settings-wrapper">
+                    <button id="settings-btn" class="settings-btn" onclick="toggleSettingsMenu()" title="Settings">⋮</button>
+                    <div id="settings-dropdown" class="settings-dropdown hidden">
+                        <div class="context-menu-item" onclick="showBlockedDialog()">🚫 Blocked Users</div>
+                    </div>
+                </div>
                 <button onclick="handleLogout()">Logout</button>
             </div>
         </div>
@@ -71,7 +77,6 @@
                     <button id="tab-messages" class="tab-btn active" onclick="switchTab('messages')">Messages</button>
                     <button id="tab-invites" class="tab-btn" onclick="switchTab('invites')">Invites <span id="invite-count" class="invite-count hidden">0</span></button>
                     <button id="tab-channels" class="tab-btn" onclick="switchTab('channels')">Channels</button>
-                    <button id="tab-blocked" class="tab-btn hidden" onclick="switchTab('blocked')">Blocked</button>
                 </div>
                 <div id="tab-content-messages" class="tab-content">
                     <div id="user-list" class="user-list"></div>
@@ -92,10 +97,6 @@
                     <button id="create-channel-btn" class="create-entity-btn" onclick="showCreateChannelDialog()">+ Create Channel</button>
                     <button class="create-entity-btn" onclick="showCreateGroupDialog()" style="border-color: rgba(0,255,136,0.08);">+ Create Group</button>
                     <button class="create-entity-btn" onclick="showJoinGroupDialog()" style="border-color: rgba(0,180,255,0.08);">+ Join Group</button>
-                </div>
-                <div id="tab-content-blocked" class="tab-content hidden">
-                    <div id="blocked-list" class="user-list"></div>
-                    <div id="blocked-empty" class="search-empty hidden">No blocked users</div>
                 </div>
             </div>
             <div class="chat-area">
@@ -199,6 +200,15 @@
             <p id="group-invite-link" class="invite-link"></p>
             <button id="group-regenerate-invite-btn" class="btn-cancel hidden" onclick="regenerateInvite()">Regenerate invite link</button>
             <button class="btn-cancel" onclick="hideGroupMembersDialog()">Close</button>
+        </div>
+    </div>
+
+    <div id="blocked-dialog" class="modal-overlay hidden">
+        <div class="modal-box">
+            <h3>Blocked Users</h3>
+            <div id="blocked-modal-list"></div>
+            <div id="blocked-modal-empty" class="search-empty hidden">No blocked users</div>
+            <button class="btn-cancel" onclick="hideBlockedDialog()">Close</button>
         </div>
     </div>
 

@@ -178,10 +178,13 @@ const MESSENGER_SOCKET = (() => {
     }
 
     function shareGroupKey(groupId, targetId, encryptedBroadcastKey) {
-        if (_isConnected()) {
-            const b64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBroadcastKey)));
-            socket.emit("share_group_key", { group_id: groupId, target_id: targetId, encrypted_broadcast_key: b64 });
+        if (!_isConnected()) {
+            console.error("Cannot share group key: socket disconnected");
+            return false;
         }
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(encryptedBroadcastKey)));
+        socket.emit("share_group_key", { group_id: groupId, target_id: targetId, encrypted_broadcast_key: b64 });
+        return true;
     }
 
     function notifyPermissionRequested(ownerId) {

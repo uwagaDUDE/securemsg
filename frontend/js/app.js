@@ -296,7 +296,6 @@
         if (tabContent) tabContent.classList.remove("hidden");
         if (tab === "invites") loadIncomingRequests();
         if (tab === "channels") loadChannels();
-        if (tab === "blocked") loadBlocked();
     };
 
     // ── page switching ──
@@ -711,6 +710,7 @@
         await loadUsers();
         await fetchUnreadCounts();
         loadIncomingRequests();
+        loadBlocked();
         connectSocket(token);
         initVisibilityTracking();
         initNotifications();
@@ -872,6 +872,7 @@
             onGroupKeyShared: async (data) => {
                 if (activeGroupId === data.group_id && data.owner_id !== currentUser.id) {
                     await loadGroupSharedKey(data.group_id, data.owner_id);
+                    await _shareMyGroupKeyWith(data.group_id, data.owner_id);
                     await renderGroupMessages(data.group_id);
                 }
                 if (activeGroupId === data.group_id && data.target_id === currentUser.id) {
@@ -879,7 +880,7 @@
                 }
             },
             onGroupKeyRevoked: async (data) => {
-                delete broadcastKeyCache['g:' + data.owner_id];
+                delete groupKeyCache['g:' + data.owner_id];
                 if (activeGroupId === data.group_id && data.target_id === currentUser.id) {
                     await renderGroupMessages(data.group_id);
                 }
@@ -968,7 +969,7 @@
                 div.className = "request-item";
                 div.innerHTML = `
                     <span class="request-user">Request sent to ${escHtml(r.owner_username)}</span>
-                    <button class="btn-cancel-outgoing" onclick="cancelOutgoingRequest(${r.owner_id})">Cancel</button>
+                    <button class="btn-cancel-outgoing" onclick="cancelOutgoingRequest(${r.owner_id}).catch(function(e){console.error('cancel failed:',e)})">Cancel</button>
                 `;
                 outgoingContainer.appendChild(div);
             });
@@ -977,16 +978,16 @@
 
     window.cancelOutgoingRequest = async function(userId) {
         const token = localStorage.getItem("token");
-        try {
-            await apiFetch(`/api/permissions/outgoing/${userId}`, {
-                method: "DELETE",
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            await loadIncomingRequests();
-            await loadUsers();
-        } catch (e) {
-            console.error("cancelOutgoingRequest failed:", e);
+        const res = await apiFetch(`/api/permissions/outgoing/${userId}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+            var err = await parseError(res);
+            throw new Error(err || "cancel failed");
         }
+        await loadIncomingRequests();
+        await loadUsers();
     };
 
     async function respondToRequest(permId, action) {
@@ -1817,16 +1818,13 @@
     }
 
     function renderBlocked(blocked) {
-        const container = $("blocked-list");
-        const empty = $("blocked-empty");
-        const tabBtn = $("tab-blocked");
+        const container = $("blocked-modal-list");
+        const empty = $("blocked-modal-empty");
         if (!blocked.length) {
-            tabBtn.classList.add("hidden");
             if (empty) empty.classList.remove("hidden");
             if (container) container.innerHTML = "";
             return;
         }
-        tabBtn.classList.remove("hidden");
         if (empty) empty.classList.add("hidden");
         if (container) {
             container.innerHTML = "";
@@ -1843,10 +1841,11 @@
     }
 
     window.blockUser = async function(userId) {
-        if (!confirm("Block this user? All permissions and keys will be revoked.")) return;
+        if (!confirm("Block this user? Shared encryption keys will be removed.")) return;
         const token = localStorage.getItem("token");
         await apiFetch(`/api/users/${userId}/block`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
         await loadUsers();
+        await loadBlocked();
     };
 
     window.unblockUser = async function(userId) {
@@ -1856,10 +1855,32 @@
         await loadUsers();
     };
 
+    window.toggleSettingsMenu = function() {
+        const dd = $("settings-dropdown");
+        if (dd) dd.classList.toggle("hidden");
+    };
+
+    window.showBlockedDialog = function() {
+        const dd = $("settings-dropdown");
+        if (dd) dd.classList.add("hidden");
+        const dialog = $("blocked-dialog");
+        if (dialog) dialog.classList.remove("hidden");
+        loadBlocked();
+    };
+
+    window.hideBlockedDialog = function() {
+        const dialog = $("blocked-dialog");
+        if (dialog) dialog.classList.add("hidden");
+    };
+
     // ── Context menu ──
     document.addEventListener("click", function(e) {
         if (!e.target.closest("#context-menu") && !e.target.closest(".message")) {
             $("context-menu").classList.add("hidden");
+        }
+        if (!e.target.closest(".settings-wrapper")) {
+            const dd = $("settings-dropdown");
+            if (dd) dd.classList.add("hidden");
         }
     });
 
@@ -2320,7 +2341,13 @@
                     method: "DELETE", headers: { Authorization: `Bearer ${token}` },
                 });
             } else {
-                _shareMyGroupKeyWith(groupId, targetId);
+                try {
+                    await _shareMyGroupKeyWith(groupId, targetId);
+                    showGroupMembersDialog(groupId);
+                } catch (e) {
+                    console.error("share group key failed:", e);
+                    alert("Failed to share key: " + e.message);
+                }
             }
         } catch (e) { console.error("toggleGroupKey failed:", e); }
     };
@@ -2340,6 +2367,8 @@
                     b64dec(member.public_key)
                 );
                 MESSENGER_SOCKET.shareGroupKey(groupId, targetId, encrypted);
+            } else {
+                console.error("Cannot share key: user", targetId, "has no public_key");
             }
         } catch (e) { console.error("_shareMyGroupKeyWith failed:", e); }
     }
@@ -2538,7 +2567,9 @@
                 var unread = unreadCounts[item.id] || 0;
                 var statusText, statusClass;
                 var actionBtn = "";
-                if (item.is_online) {
+                if (item.is_blocked) {
+                    statusText = '🔒 Blocked'; statusClass = 'status-blocked';
+                } else if (item.is_online) {
                     statusText = 'Online'; statusClass = 'status-online';
                 } else if (item.last_seen) {
                     var d = new Date(item.last_seen);
@@ -2548,8 +2579,10 @@
                     statusText = "Can chat"; statusClass = "status-approved";
                 } else if (item.permission_status === "pending") {
                     statusText = "Pending"; statusClass = "status-pending";
+                    actionBtn = `<button class="btn-cancel-outgoing" data-cancel-id="${item.id}">Cancel</button>`;
                 } else if (item.permission_status === "rejected") {
                     statusText = "Rejected"; statusClass = "status-rejected";
+                    actionBtn = `<button class="btn-request" data-resend-id="${item.id}">+</button>`;
                 } else {
                     statusText = "Request"; statusClass = "status-none";
                     actionBtn = `<button class="btn-request" data-id="${item.id}">+</button>`;
@@ -2568,9 +2601,28 @@
 
                 var reqBtn = div.querySelector(".btn-request");
                 if (reqBtn) {
-                    reqBtn.onclick = function(e) { e.stopPropagation(); requestPermission(item.id, item.username); };
+                    if (reqBtn.dataset.resendId) {
+                        reqBtn.onclick = async function(e) {
+                            e.stopPropagation();
+                            try {
+                                await cancelOutgoingRequest(item.id);
+                                await requestPermission(item.id, item.username);
+                            } catch (err) {
+                                console.error("resend failed:", err);
+                            }
+                        };
+                    } else {
+                        reqBtn.onclick = function(e) { e.stopPropagation(); requestPermission(item.id, item.username); };
+                    }
                 }
-                if (item.permission_status === "approved") {
+                var cancelBtn = div.querySelector(".btn-cancel-outgoing");
+                if (cancelBtn) {
+                    cancelBtn.onclick = function(e) { e.stopPropagation(); cancelOutgoingRequest(item.id); };
+                }
+                if (item.is_blocked) {
+                    div.style.cursor = "default";
+                    div.onclick = null;
+                } else if (item.permission_status === "approved") {
                     div.onclick = function() { openChat(item, div); };
                     div.addEventListener("contextmenu", function(e) {
                         e.preventDefault();
